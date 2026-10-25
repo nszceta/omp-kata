@@ -1,0 +1,78 @@
+{
+  "name": "omp-kata",
+  "version": "0.1.0",
+  "description": "kata issue-tracker integration for omp: agent contract, per-agent identity, inbox delivery, attention lifecycle",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "README.md"
+  ],
+  "exports": "./src/index.ts",
+  "engines": {
+    "bun": ">=1.3.14"
+  },
+  "scripts": {
+    "test": "bun test",
+    "test:unit": "bun test test/unit",
+    "test:e2e": "bun test test/e2e",
+    "typecheck": "tsc --noEmit"
+  },
+  "omp": {
+    "extensions": [
+      "./src/index.ts"
+    ],
+    "settings": {
+      "executable": {
+        "type": "string",
+        "default": "kata",
+        "description": "kata executable (name on PATH or absolute path)"
+      },
+      "contract": {
+        "type": "boolean",
+        "default": true,
+        "description": "Inject the kata agent contract into the system prompt (inside kata workspaces only)"
+      },
+      "contractSource": {
+        "type": "string",
+        "default": "",
+        "description": "Passed as --source to `kata agent-contract-hook` when non-empty (replaces the built-in contract text)"
+      },
+      "inbox": {
+        "type": "boolean",
+        "default": true,
+        "description": "Deliver kata inbox requests to the agent as <kata_inbox> messages"
+      },
+      "inboxPollSeconds": {
+        "type": "number",
+        "default": 15,
+        "min": 0,
+        "description": "Minimum seconds between mid-turn/idle inbox checks; 0 checks after every tool result"
+      },
+      "wakeOnInbox": {
+        "type": "boolean",
+        "default": false,
+        "description": "An idle main session starts a turn when new inbox requests arrive (otherwise it only notifies)"
+      },
+      "attention": {
+        "type": "boolean",
+        "default": true,
+        "description": "Start kata attention tracking on claim / KATA_REF and end it when the session ends"
+      },
+      "identity": {
+        "type": "boolean",
+        "default": true,
+        "description": "Give each agent its own kata identity (actor/teammate/inbox address) via a PATH shim; false leaves kata untouched"
+      }
+    },
+    "description": "kata issue-tracker integration for omp: agent contract, per-agent identity, inbox delivery, attention lifecycle"
+  },
+  "devDependencies": {
+    "@oh-my-pi/pi-ai": "18.12.6",
+    "@oh-my-pi/pi-coding-agent": "18.12.6",
+    "@types/bun": "^1.3.14",
+    "typescript": "^5.9.3"
+  }
+}

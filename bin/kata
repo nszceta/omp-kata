@@ -1,0 +1,42 @@
+#!/bin/sh
+# omp-kata shim: runs the real kata with the identity of the omp agent session that invoked it.
+#
+# omp sets PI_SESSION_ID per bash command; the omp-kata extension writes
+# $OMP_KATA_STATE_DIR/$PI_SESSION_ID.env (KATA_AUTHOR, KATA_TEAMMATE, KATA_INBOX_USER, OMP_KATA_REAL).
+# Without such a file this is a transparent pass-through. Identity is applied here, at exec time, so
+# nothing in the agent's command text changes and a model-authored `export KATA_AUTHOR=...` cannot win.
+
+self_dir=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd -P)
+
+if [ -n "${PI_SESSION_ID:-}" ] && [ -n "${OMP_KATA_STATE_DIR:-}" ]; then
+	case $PI_SESSION_ID in
+	*/*) ;;
+	*)
+		state="$OMP_KATA_STATE_DIR/$PI_SESSION_ID.env"
+		if [ -f "$state" ]; then
+			# shellcheck disable=SC1090
+			. "$state"
+		fi
+		;;
+	esac
+fi
+
+if [ -n "${OMP_KATA_REAL:-}" ] && [ -x "$OMP_KATA_REAL" ] && [ ! -d "$OMP_KATA_REAL" ]; then
+	exec "$OMP_KATA_REAL" "$@"
+fi
+
+# No configured real executable: first `kata` on PATH that is not this shim's own directory.
+old_ifs=$IFS
+IFS=:
+for dir in $PATH; do
+	[ -n "$dir" ] || dir=.
+	dir_real=$(CDPATH= cd -- "$dir" 2>/dev/null && pwd -P) || continue
+	[ "$dir_real" = "$self_dir" ] && continue
+	if [ -x "$dir/kata" ] && [ ! -d "$dir/kata" ]; then
+		IFS=$old_ifs
+		exec "$dir/kata" "$@"
+	fi
+done
+IFS=$old_ifs
+echo "kata: omp-kata shim could not find the real kata executable on PATH" >&2
+exit 127

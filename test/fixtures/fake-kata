@@ -1,0 +1,48 @@
+#!/usr/bin/env bun
+// Scriptable stand-in for the kata CLI, used by unit tests for failure modes and argv/env capture.
+//
+//   FAKE_KATA_LOG        file; every invocation appends one JSON line {args, cwd, env}
+//   FAKE_KATA_RESPONSES  JSON file {"<arg prefix>": {code?, stdout?, stderr?, sleepMs?}}; re-read on every call
+//                        so tests can change replies between calls. The longest matching prefix of the
+//                        space-joined argv wins ("agent-hook attention-native" beats "agent-hook").
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
+
+interface Reply {
+	code?: number;
+	stdout?: string;
+	stderr?: string;
+	sleepMs?: number;
+}
+
+const args = process.argv.slice(2);
+const captured: Record<string, string> = {};
+for (const [key, value] of Object.entries(process.env)) {
+	if (key.startsWith("KATA_") && value !== undefined) captured[key] = value;
+}
+if (process.env.FAKE_KATA_LOG) {
+	appendFileSync(process.env.FAKE_KATA_LOG, `${JSON.stringify({ args, cwd: process.cwd(), env: captured })}\n`);
+}
+
+const defaults: Record<string, Reply> = {
+	whoami: { stdout: JSON.stringify({ kata_api_version: 1, actor: "fakeuser", source: "env" }) },
+	"agent-contract-hook": {
+		stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: "FAKE CONTRACT TEXT" } }),
+	},
+};
+const configured: Record<string, Reply> =
+	process.env.FAKE_KATA_RESPONSES && existsSync(process.env.FAKE_KATA_RESPONSES)
+		? JSON.parse(readFileSync(process.env.FAKE_KATA_RESPONSES, "utf8"))
+		: {};
+
+const joined = args.join(" ");
+function lookup(table: Record<string, Reply>): Reply | undefined {
+	const matches = Object.keys(table).filter(key => joined === key || joined.startsWith(`${key} `));
+	matches.sort((a, b) => b.length - a.length);
+	return matches[0] === undefined ? undefined : table[matches[0]];
+}
+const reply: Reply = lookup(configured) ?? lookup(defaults) ?? {};
+
+if (reply.sleepMs) await Bun.sleep(reply.sleepMs);
+if (reply.stdout) process.stdout.write(reply.stdout);
+if (reply.stderr) process.stderr.write(reply.stderr);
+process.exit(reply.code ?? 0);
