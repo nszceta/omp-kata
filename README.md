@@ -19,10 +19,9 @@ Outside a kata workspace it does nothing, except that `/kata` reports that.
 ## Install
 
 ```sh
-git clone <this repo> ~/src/omp-kata && cd ~/src/omp-kata && bun install   # types only; runtime has no dependencies
-omp plugin link ~/src/omp-kata          # development / local checkout
-# or
-omp plugin install omp-kata             # from a package registry, once published
+git clone https://github.com/nszceta/omp-kata ~/src/omp-kata
+cd ~/src/omp-kata && bun install   # types only; runtime has no dependencies
+omp plugin link ~/src/omp-kata
 ```
 
 Requirements: omp ≥ 18.12 (Bun runtime) and `kata` ≥ 0.20 on `PATH` (or set `executable`).
