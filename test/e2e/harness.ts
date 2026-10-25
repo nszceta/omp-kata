@@ -193,6 +193,16 @@ export class E2EEnv {
 		return { ...r, requests: this.readLog() };
 	}
 
+	/** start `omp --mode rpc` with the scripted model (stays alive until `close()`) */
+	startRpc(script: Script, o: { cwd?: string; env?: Record<string, string> } = {}): RpcSession {
+		writeFileSync(this.scriptPath, JSON.stringify(script));
+		writeFileSync(this.logPath, "");
+		const args = ["--mode", "rpc", "--no-session", "--no-title"];
+		if (!this.opts.link) args.push("-e", REPO_ROOT);
+		args.push("-e", FAKE_PROVIDER, "--model", "fake/scripted");
+		return new RpcSession([OMP, ...args], o.cwd ?? this.repo, this.baseEnv({ ...this.opts.env, ...o.env }));
+	}
+
 	readLog(): RequestLog[] {
 		if (!existsSync(this.logPath)) return [];
 		return readFileSync(this.logPath, "utf8").split("\n").filter(Boolean).map(l => JSON.parse(l) as RequestLog);
@@ -307,4 +317,78 @@ export function issuedBashCommands(req: RequestLog): string[] {
 		for (const b of m.content) if (b?.type === "toolCall" && b.name === "bash") out.push(String(b.arguments?.command ?? ""));
 	}
 	return out;
+}
+
+export type Frame = Record<string, any> & { type: string };
+
+/** JSONL client for `omp --mode rpc`: every stdout frame is recorded; waiters poll the frame list */
+export class RpcSession {
+	readonly frames: Frame[] = [];
+	private readonly proc: ReturnType<typeof Bun.spawn>;
+	private readonly pump: Promise<void>;
+	private nextId = 1;
+
+	constructor(cmd: string[], cwd: string, env: Record<string, string>) {
+		const proc = Bun.spawn(cmd, { cwd, env, stdin: "pipe", stdout: "pipe", stderr: "ignore" });
+		this.proc = proc;
+		this.pump = (async () => {
+			const dec = new TextDecoder();
+			let buf = "";
+			for await (const chunk of proc.stdout as ReadableStream<Uint8Array>) {
+				buf += dec.decode(chunk, { stream: true });
+				let i: number;
+				while ((i = buf.indexOf("\n")) >= 0) {
+					const line = buf.slice(0, i).trim();
+					buf = buf.slice(i + 1);
+					if (!line) continue;
+					try {
+						this.frames.push(JSON.parse(line) as Frame);
+					} catch {
+						// non-protocol noise
+					}
+				}
+			}
+		})();
+	}
+
+	send(frame: Record<string, unknown>): string {
+		const id = String(this.nextId++);
+		const stdin = this.proc.stdin as { write(d: string): unknown; flush?(): unknown };
+		stdin.write(`${JSON.stringify({ id, ...frame })}\n`);
+		stdin.flush?.();
+		return id;
+	}
+
+	/** wait until a frame at index >= from satisfies `match`; returns it. */
+	async waitFrame(match: (f: Frame) => boolean, o: { from?: number; timeoutMs?: number; what?: string } = {}): Promise<Frame> {
+		const deadline = Date.now() + (o.timeoutMs ?? 60_000);
+		for (;;) {
+			const f = this.frames.slice(o.from ?? 0).find(match);
+			if (f) return f;
+			if (Date.now() > deadline) throw new Error(`timed out waiting for frame: ${o.what ?? "?"}; frames: ${this.frames.map(x => x.type + (x.method ? `:${x.method}` : "")).join(", ")}`);
+			await Bun.sleep(50);
+		}
+	}
+
+	/** send a prompt and wait for its prompt_result (or a synchronous agentInvoked:false response); returns frame count afterwards */
+	async prompt(message: string, timeoutMs = 60_000): Promise<void> {
+		const from = this.frames.length;
+		const id = this.send({ type: "prompt", message });
+		await this.waitFrame(
+			f => (f.type === "prompt_result" && f.id === id) || (f.type === "response" && f.id === id && (f.success === false || f.data?.agentInvoked === false)),
+			{ from, timeoutMs, what: `prompt_result for "${message}"` },
+		);
+	}
+
+	/** close stdin and wait for exit; kills after a grace period. returns exit code */
+	async close(graceMs = 15_000): Promise<number | null> {
+		try {
+			(this.proc.stdin as { end(): unknown }).end();
+		} catch {}
+		const timer = setTimeout(() => this.proc.kill("SIGKILL"), graceMs);
+		const code = await this.proc.exited;
+		clearTimeout(timer);
+		await this.pump.catch(() => {});
+		return code;
+	}
 }
