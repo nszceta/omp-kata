@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,50 @@ export function renderIdentityFile(identity: Identity, realExecutable: string | 
 	];
 	if (realExecutable) lines.push(`OMP_KATA_REAL=${shellQuote(realExecutable)}; export OMP_KATA_REAL`);
 	return `${lines.join("\n")}\n`;
+}
+
+/** State dirs are `omp-kata-<pid>-XXXXXX`: the pid lets a later process recognise leftovers of dead ones. */
+export const STATE_DIR_PREFIX = "omp-kata-";
+const STATE_DIR_NAME = /^omp-kata-(\d+)-[A-Za-z0-9]{6}$/;
+
+function isProcessAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		// EPERM: exists but belongs to someone else, so it is alive.
+		return (error as NodeJS.ErrnoException).code !== "ESRCH";
+	}
+}
+
+/**
+ * Removes `omp-kata-<pid>-XXXXXX` directories in `root` whose process is gone (crash, SIGKILL, SIGTERM:
+ * the exit hook cannot run then). Live pids, our own pid and any other name are left alone.
+ * Returns the removed directory names.
+ */
+export function sweepStaleStateDirs(root: string): string[] {
+	const removed: string[] = [];
+	let names: string[];
+	try {
+		names = readdirSync(root);
+	} catch {
+		return removed;
+	}
+	for (const name of names) {
+		const match = STATE_DIR_NAME.exec(name);
+		if (!match) continue;
+		const pid = Number(match[1]);
+		if (pid === process.pid || isProcessAlive(pid)) continue;
+		const path = join(root, name);
+		try {
+			if (!lstatSync(path).isDirectory()) continue;
+			rmSync(path, { recursive: true, force: true });
+			removed.push(name);
+		} catch {
+			// not ours to remove (permissions) or already gone
+		}
+	}
+	return removed;
 }
 
 const PREFIX_VAR = "__omp_kata_d";
@@ -63,7 +107,9 @@ export class ShimHost {
 
 	private ensureDirs(): { stateDir: string; shimDir: string } {
 		if (!this.stateDir || !this.shimDir) {
-			this.stateDir = mkdtempSync(join(this.options.tmpRoot ?? tmpdir(), "omp-kata-"));
+			const root = this.options.tmpRoot ?? tmpdir();
+			sweepStaleStateDirs(root);
+			this.stateDir = mkdtempSync(join(root, `${STATE_DIR_PREFIX}${process.pid}-`));
 			chmodSync(this.stateDir, 0o700);
 			this.shimDir = join(this.stateDir, "bin");
 			mkdirSync(this.shimDir, { mode: 0o700 });

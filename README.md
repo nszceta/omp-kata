@@ -53,7 +53,7 @@ Booleans accept `true`/`false`/`1`/`0`.
 
 omp runs subagents **in the same process** as the main agent, so `process.env` cannot carry per-agent identity, and rewriting the model's commands makes the model see (and imitate) text it never wrote. The plugin therefore delivers identity out of band, with a `kata` shim:
 
-1. On first use the plugin creates a private per-process directory (`$TMPDIR/omp-kata-*`, mode 0700) containing a copy of `bin/kata` and prepends it to `PATH` (once, shared by all sessions of the process); it also exports `OMP_KATA_STATE_DIR` and `OMP_KATA_REAL` (the real kata's absolute path, found on `PATH` outside the shim directory).
+1. On first use the plugin creates a private per-process directory (`$TMPDIR/omp-kata-<pid>-XXXXXX`, mode 0700; leftovers of dead pids are swept on the next install) containing a copy of `bin/kata` and prepends it to `PATH` (once, shared by all sessions of the process); it also exports `OMP_KATA_STATE_DIR` and `OMP_KATA_REAL` (the real kata's absolute path, found on `PATH` outside the shim directory).
 2. For every agent session it writes `<state dir>/<session id>.env` (atomically) with that agent's `KATA_AUTHOR`, `KATA_TEAMMATE` (or `unset`) and `KATA_INBOX_USER`. The file is removed at session shutdown (the old session's file on `/new`, `/resume`, fork), and the whole directory when the process exits.
 3. omp sets `PI_SESSION_ID` for every bash command of an agent session (main and subagents differ). The shim sources `$OMP_KATA_STATE_DIR/$PI_SESSION_ID.env` if it exists and execs the real kata; otherwise it is a plain pass-through (first `kata` on `PATH` that is not the shim's own directory, never itself).
 
