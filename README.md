@@ -12,7 +12,7 @@ Inside a kata workspace (a directory with `.kata.toml` at or above the session c
 3. **Delivers the kata inbox** (`kata inbox --context`) as `<kata_inbox>` messages: with every prompt, between tool calls (throttled), and optionally waking an idle session.
 4. **Manages attention.** `kata claim <ref>` starts attention tracking; closing stops tracking; when a session ends, anything still claimed becomes `needs-human` ("session ended without hand-off").
 5. Shows a footer status line and provides a `/kata` command.
-6. Ships an omp-specific **`kata` skill** (delegation recipe for subagents).
+6. Ships an omp-specific **`kata` skill** (delegation recipe for subagents) and a **`/kata-run` command** that works a project's ready queue.
 
 Outside a kata workspace it does nothing, except that `/kata` reports that.
 
@@ -96,6 +96,10 @@ With a UI, the footer shows `kata <inbox user>`, plus ` · <tracked refs>` and `
 - `/kata inbox`: fetch and show the inbox.
 - `/kata refresh`: drop the cached contract and actor.
 
+### `/kata-run <project> [label]`
+
+Markdown slash command (`commands/kata-run.md`, discovered from the linked plugin root). It prompts the agent to loop `kata next --project <project> --unowned` (filtered by `--label` when given) → claim → follow body and comments → verify → close, leaving parents with open children for last, flagging blocked issues `needs-human`/`stuck`, and fanning independent issues out to subagents, until the ready queue is empty. Without a label it works every ready issue in the project.
+
 ## Why no MCP server
 
 `kata mcp serve` fixes the actor and project per process, so it cannot express per-agent identity when subagents share one process; it would start a kata daemon in every omp session; and it duplicates the CLI, which agents already drive through bash. Everything this plugin needs is a hook point, not a tool surface.
@@ -115,4 +119,4 @@ bun test test/e2e      # real omp binary + real kata + a scripted fake model pro
 
 All tests run with a private `HOME`, `PI_CODING_AGENT_DIR` and `KATA_HOME` and stop the kata daemon they start; nothing touches `~/.omp` or your real kata data. Environment overrides: `KATA_BIN` (kata binary), `OMP_BIN` (omp binary).
 
-Layout: `src/index.ts` (event wiring) · `session.ts` (per-session behavior) · `config.ts` · `kata.ts` (process runner) · `shim.ts` + `bin/kata` (identity delivery) · `workspace.ts` · `identity.ts` · `contract.ts` · `inbox.ts` · `attention.ts` · `refs.ts` (claim/close parser) · `status.ts` · `commands.ts` · `skills/kata/SKILL.md`.
+Layout: `src/index.ts` (event wiring) · `session.ts` (per-session behavior) · `config.ts` · `kata.ts` (process runner) · `shim.ts` + `bin/kata` (identity delivery) · `workspace.ts` · `identity.ts` · `contract.ts` · `inbox.ts` · `attention.ts` · `refs.ts` (claim/close parser) · `status.ts` · `commands.ts` · `skills/kata/SKILL.md` · `commands/kata-run.md`.

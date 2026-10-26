@@ -8,6 +8,7 @@
     "bin",
     "src",
     "skills",
+    "commands",
     "README.md"
   ],
   "exports": "./src/index.ts",
