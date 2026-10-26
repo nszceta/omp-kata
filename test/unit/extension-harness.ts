@@ -27,7 +27,7 @@ export const HOST_PID = 4242;
 export const ADDENDUM_HEAD =
 	"omp-kata: omp sets kata identity automatically for every agent in every bash command. Do NOT export KATA_AUTHOR, KATA_TEAMMATE or KATA_INBOX_USER yourself and do NOT put them in task assignments.";
 export const ADDENDUM_TAIL =
-	"Attention starts automatically on `kata claim` and ends when the session ends; inbox requests arrive as <kata_inbox> messages.";
+	"Attention starts automatically on `kata claim` and ends when the session ends; inbox requests arrive as <kata_inbox> messages.\nKata refs (<project>#<id> or bare short ids) are tracker-local handles. NEVER write them into repository content: source, tests, docs, config, file or directory names, scratch paths, or commit messages. Describe the problem in words in the repo. Link the other way: record commit SHAs and doc paths on the issue (`kata comment`, `--evidence commit:<sha>`).";
 
 /** The omp addendum for actor `fakeuser`, with the given teammate text and inbox address. */
 export function addendum(teammate: string, inbox: string): string {

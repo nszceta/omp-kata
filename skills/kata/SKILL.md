@@ -44,6 +44,8 @@ re-read or restate the contract.
    then `modelRoles.task`); `model: "@smol"` only when the body names the exact change and it needs no
    design or investigation; `model: "@slow"` for open-ended design, debugging without a repro, or changes
    spanning several subsystems. When unsure, take the higher tier. Never pass a concrete `provider/model` id.
+   The ref is for kata commands only: tell the child not to cite it in code, docs, file names, or commit
+   messages, and to record commit SHAs and doc paths on the issue instead.
 3. Wait without blocking your own work: run
    `kata wait <child-refs> --until attention --any --timeout 10m`
    as an async bash job. It returns when any child sets a non-`ok` attention (`needs-human`, `stuck`) or closes

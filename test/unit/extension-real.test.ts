@@ -97,7 +97,8 @@ describe("real kata through the extension", () => {
 		expect(block).toStartWith("<kata_contract>\nKata is the system of record for intent.");
 		expect(block).toEndWith(
 			"\nidentity: actor=unit-actor teammate=(none) inbox=unit-actor\n" +
-				"Attention starts automatically on `kata claim` and ends when the session ends; inbox requests arrive as <kata_inbox> messages.\n</kata_contract>",
+				"Attention starts automatically on `kata claim` and ends when the session ends; inbox requests arrive as <kata_inbox> messages.\n" +
+				"Kata refs (<project>#<id> or bare short ids) are tracker-local handles. NEVER write them into repository content: source, tests, docs, config, file or directory names, scratch paths, or commit messages. Describe the problem in words in the repo. Link the other way: record commit SHAs and doc paths on the issue (`kata comment`, `--evidence commit:<sha>`).\n</kata_contract>",
 		);
 	}, 30_000);
 

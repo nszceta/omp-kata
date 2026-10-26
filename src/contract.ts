@@ -65,6 +65,7 @@ export function ompAddendum(identity: Identity | undefined): string {
 			? [`identity: actor=${identity.actor} teammate=${identity.teammate || "(none)"} inbox=${identity.inboxUser}`]
 			: []),
 		"Attention starts automatically on `kata claim` and ends when the session ends; inbox requests arrive as <kata_inbox> messages.",
+		"Kata refs (<project>#<id> or bare short ids) are tracker-local handles. NEVER write them into repository content: source, tests, docs, config, file or directory names, scratch paths, or commit messages. Describe the problem in words in the repo. Link the other way: record commit SHAs and doc paths on the issue (`kata comment`, `--evidence commit:<sha>`).",
 	].join("\n");
 }
 

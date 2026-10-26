@@ -251,7 +251,7 @@ describe("withContract", () => {
 describe("ompAddendum", () => {
 	const RULE =
 		"omp-kata: omp sets kata identity automatically for every agent in every bash command. Do NOT export KATA_AUTHOR, KATA_TEAMMATE or KATA_INBOX_USER yourself and do NOT put them in task assignments.";
-	const ATTENTION = "Attention starts automatically on `kata claim` and ends when the session ends; inbox requests arrive as <kata_inbox> messages.";
+	const ATTENTION = "Attention starts automatically on `kata claim` and ends when the session ends; inbox requests arrive as <kata_inbox> messages.\nKata refs (<project>#<id> or bare short ids) are tracker-local handles. NEVER write them into repository content: source, tests, docs, config, file or directory names, scratch paths, or commit messages. Describe the problem in words in the repo. Link the other way: record commit SHAs and doc paths on the issue (`kata comment`, `--evidence commit:<sha>`).";
 
 	test("a main agent shows its teammate-less identity", () => {
 		expect(ompAddendum({ actor: "adam", teammate: "", inboxUser: "adam" })).toBe(
@@ -270,9 +270,9 @@ describe("ompAddendum", () => {
 	});
 
 	test("is exactly 3 lines with an identity and 2 without", () => {
-		expect(ompAddendum({ actor: "adam", teammate: "bob", inboxUser: "adam/bob" }).split("\n")).toHaveLength(3);
-		expect(ompAddendum({ actor: "adam", teammate: "", inboxUser: "adam" }).split("\n")).toHaveLength(3);
-		expect(ompAddendum(undefined).split("\n")).toHaveLength(2);
+		expect(ompAddendum({ actor: "adam", teammate: "bob", inboxUser: "adam/bob" }).split("\n")).toHaveLength(4);
+		expect(ompAddendum({ actor: "adam", teammate: "", inboxUser: "adam" }).split("\n")).toHaveLength(4);
+		expect(ompAddendum(undefined).split("\n")).toHaveLength(3);
 	});
 
 	test("does not describe an export preamble or shell history", () => {
