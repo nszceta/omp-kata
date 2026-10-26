@@ -9,6 +9,7 @@ import {
 	loadPluginSettings,
 	parseBoolean,
 	parseNonNegativeNumber,
+	parseRefGuardMode,
 	resolveSettings,
 	type SettingsLoader,
 } from "../../src/config";
@@ -32,6 +33,7 @@ describe("defaults and names", () => {
 			wakeOnInbox: false,
 			attention: true,
 			identity: true,
+			refGuard: "block",
 		});
 	});
 
@@ -45,6 +47,7 @@ describe("defaults and names", () => {
 			wakeOnInbox: "OMP_KATA_WAKE_ON_INBOX",
 			attention: "OMP_KATA_ATTENTION",
 			identity: "OMP_KATA_IDENTITY",
+			refGuard: "OMP_KATA_REF_GUARD",
 		});
 	});
 
@@ -58,6 +61,7 @@ describe("defaults and names", () => {
 			OMP_KATA_WAKE_ON_INBOX: "true",
 			OMP_KATA_ATTENTION: "false",
 			OMP_KATA_IDENTITY: "false",
+			OMP_KATA_REF_GUARD: "warn",
 		};
 		expect(await resolveWith(env)).toEqual({
 			executable: "/e/kata",
@@ -68,6 +72,7 @@ describe("defaults and names", () => {
 			wakeOnInbox: true,
 			attention: false,
 			identity: false,
+			refGuard: "warn",
 		});
 	});
 });
@@ -82,6 +87,7 @@ describe("precedence env > plugin settings > defaults", () => {
 		wakeOnInbox: true,
 		attention: false,
 		identity: false,
+		refGuard: "warn",
 	};
 
 	test("plugin settings override defaults", async () => {
@@ -100,6 +106,7 @@ describe("precedence env > plugin settings > defaults", () => {
 				OMP_KATA_WAKE_ON_INBOX: "0",
 				OMP_KATA_ATTENTION: "true",
 				OMP_KATA_IDENTITY: "true",
+				OMP_KATA_REF_GUARD: "off",
 			},
 			stored,
 		);
@@ -112,6 +119,7 @@ describe("precedence env > plugin settings > defaults", () => {
 			wakeOnInbox: false,
 			attention: true,
 			identity: true,
+			refGuard: "off",
 		});
 	});
 
@@ -208,6 +216,24 @@ describe("identity setting", () => {
 	});
 });
 
+describe("refGuard setting", () => {
+	test("parseRefGuardMode accepts block/warn/off case-insensitively with whitespace", () => {
+		expect([" Block ", "WARN", "off"].map(parseRefGuardMode)).toEqual(["block", "warn", "off"]);
+	});
+
+	test("parseRefGuardMode rejects everything else", () => {
+		expect(["", "true", "false", "blocked", 0, true, undefined].map(parseRefGuardMode)).toEqual(Array(7).fill(undefined));
+	});
+
+	test("defaults to block; env beats the plugin setting; an unparsable value falls through", async () => {
+		expect((await resolveWith({})).refGuard).toBe("block");
+		expect((await resolveWith({}, { refGuard: "off" })).refGuard).toBe("off");
+		expect((await resolveWith({ OMP_KATA_REF_GUARD: "warn" }, { refGuard: "off" })).refGuard).toBe("warn");
+		expect((await resolveWith({ OMP_KATA_REF_GUARD: "nope" }, { refGuard: "off" })).refGuard).toBe("off");
+		expect((await resolveWith({}, { refGuard: false })).refGuard).toBe("block");
+	});
+});
+
 describe("string settings", () => {
 	test("blank executable falls through; value is trimmed", async () => {
 		expect((await resolveWith({ OMP_KATA_EXECUTABLE: "   " }, { executable: "/p/kata" })).executable).toBe("/p/kata");
@@ -289,6 +315,7 @@ interface ManifestSetting {
 	default: unknown;
 	description?: string;
 	min?: number;
+	values?: string[];
 }
 
 const root = resolve(import.meta.dir, "../..");
@@ -310,12 +337,14 @@ describe("package.json omp.settings stays in sync with config.ts", () => {
 		}
 	});
 
-	test("types match (min 0 for inboxPollSeconds)", () => {
+	test("types match (min 0 for inboxPollSeconds; refGuard is an enum)", () => {
 		const manifest = manifestSettings();
 		for (const key of Object.keys(DEFAULT_SETTINGS) as (keyof KataSettings)[]) {
-			expect({ key, type: manifest[key]?.type }).toEqual({ key, type: typeof DEFAULT_SETTINGS[key] });
+			const expected = key === "refGuard" ? "enum" : typeof DEFAULT_SETTINGS[key];
+			expect({ key, type: manifest[key]?.type }).toEqual({ key, type: expected });
 		}
 		expect(manifest.inboxPollSeconds?.min).toBe(0);
+		expect(manifest.refGuard?.values).toEqual(["block", "warn", "off"]);
 	});
 
 	test("every setting has a description", () => {

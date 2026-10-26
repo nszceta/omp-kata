@@ -10,7 +10,11 @@ export interface KataSettings {
 	attention: boolean;
 	/** Write the per-session identity file the PATH shim reads; false = shim passes straight through. */
 	identity: boolean;
+	/** What to do when a tool call would write a kata ref into repository content. */
+	refGuard: RefGuardMode;
 }
+
+export type RefGuardMode = "block" | "warn" | "off";
 
 export const DEFAULT_SETTINGS: Readonly<KataSettings> = {
 	executable: "kata",
@@ -21,6 +25,7 @@ export const DEFAULT_SETTINGS: Readonly<KataSettings> = {
 	wakeOnInbox: false,
 	attention: true,
 	identity: true,
+	refGuard: "block",
 };
 
 export const ENV_NAMES: Readonly<Record<keyof KataSettings, string>> = {
@@ -32,6 +37,7 @@ export const ENV_NAMES: Readonly<Record<keyof KataSettings, string>> = {
 	wakeOnInbox: "OMP_KATA_WAKE_ON_INBOX",
 	attention: "OMP_KATA_ATTENTION",
 	identity: "OMP_KATA_IDENTITY",
+	refGuard: "OMP_KATA_REF_GUARD",
 };
 
 export type Env = Record<string, string | undefined>;
@@ -66,6 +72,12 @@ function parseExecutable(raw: unknown): string | undefined {
 	return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : undefined;
 }
 
+export function parseRefGuardMode(raw: unknown): RefGuardMode | undefined {
+	if (typeof raw !== "string") return undefined;
+	const value = raw.trim().toLowerCase();
+	return value === "block" || value === "warn" || value === "off" ? value : undefined;
+}
+
 function parseSource(raw: unknown): string | undefined {
 	return typeof raw === "string" ? raw.trim() : undefined;
 }
@@ -79,6 +91,7 @@ const PARSERS: { [K in keyof KataSettings]: (raw: unknown) => KataSettings[K] | 
 	wakeOnInbox: parseBoolean,
 	attention: parseBoolean,
 	identity: parseBoolean,
+	refGuard: parseRefGuardMode,
 };
 
 interface PluginsModule {

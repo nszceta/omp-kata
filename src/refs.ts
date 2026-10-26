@@ -143,8 +143,8 @@ function basename(token: string): string {
 	return slash === -1 ? token : token.slice(slash + 1);
 }
 
-/** Index of the kata executable word in a segment, skipping leading `VAR=x`, `env`, `command`, ... words. */
-function findKataWord(words: string[], names: ReadonlySet<string>): number {
+/** Index of the executable word in a segment if its basename is in `names`, skipping leading `VAR=x`, `env`, `command`, ... words. */
+function findCommandWord(words: string[], names: ReadonlySet<string>): number {
 	for (let i = 0; i < words.length; i++) {
 		const word = words[i] as string;
 		const bare = word.replace(/^[({]+/, "");
@@ -155,7 +155,7 @@ function findKataWord(words: string[], names: ReadonlySet<string>): number {
 }
 
 function parseSegment(words: string[], names: ReadonlySet<string>): RefEvent[] {
-	let i = findKataWord(words, names);
+	let i = findCommandWord(words, names);
 	if (i === -1) return [];
 	i++;
 	// Global flags precede the subcommand.
@@ -217,4 +217,209 @@ export function parseCloseRefs(command: string, names?: readonly string[]): stri
 
 function unique(items: string[]): string[] {
 	return [...new Set(items)];
+}
+
+/** `<project>#<id>` inside free text; the lookarounds keep URL fragments and `key=a#b` values out. */
+const PROJECT_REF_IN_TEXT = /(?<![A-Za-z0-9._\-/?=&#@])([A-Za-z0-9][A-Za-z0-9._-]*)#([a-z0-9]{4,12})(?![A-Za-z0-9_=-])/g;
+
+export interface ProjectRef {
+	project: string;
+	id: string;
+}
+
+export function projectRefsIn(text: string): ProjectRef[] {
+	return [...text.matchAll(PROJECT_REF_IN_TEXT)].map(m => ({ project: m[1] as string, id: m[2] as string }));
+}
+
+/**
+ * Subcommands whose leading positional arguments are issue refs. `skip` positionals (an action word
+ * such as `label add`, `meta set`) come first; `many` takes refs until the first flag or non-ref.
+ */
+const REF_POSITIONALS: Record<string, { skip: number; many: boolean }> = {
+	assign: { skip: 0, many: false },
+	claim: { skip: 0, many: true },
+	close: { skip: 0, many: false },
+	comment: { skip: 0, many: false },
+	deadline: { skip: 0, many: false },
+	edit: { skip: 0, many: false },
+	label: { skip: 1, many: false },
+	meta: { skip: 1, many: false },
+	move: { skip: 0, many: false },
+	notify: { skip: 0, many: false },
+	reopen: { skip: 0, many: false },
+	schedule: { skip: 0, many: false },
+	show: { skip: 0, many: false },
+	status: { skip: 0, many: false },
+	unassign: { skip: 0, many: false },
+	wait: { skip: 0, many: true },
+};
+
+/** Flags whose value is one or more (comma-separated) issue refs. */
+const REF_VALUE_FLAGS: Record<string, true> = {
+	"--parent": true,
+	"--blocks": true,
+	"--blocked-by": true,
+	"--related": true,
+	"--duplicate-of": true,
+	"--superseded-by": true,
+};
+
+export interface KataMentions {
+	/** Subcommand of every kata invocation, in command order. */
+	subcommands: string[];
+	/** Issue refs passed as arguments: bare short ids and `<project>#<id>`. */
+	refs: string[];
+	/** Project names passed with `--project`. */
+	projects: string[];
+}
+
+function isShortOrProjectRef(token: string): boolean {
+	return SHORT_REF.test(token) || PROJECT_REF.test(token);
+}
+
+function collectMentions(words: string[], names: ReadonlySet<string>, out: KataMentions): void {
+	let i = findCommandWord(words, names);
+	if (i === -1) return;
+	const start = i + 1;
+	let sub: string | undefined;
+	let rule: { skip: number; many: boolean } | undefined;
+	let skipped = 0;
+	let taken = 0;
+	for (i++; i < words.length; i++) {
+		const word = words[i] as string;
+		if (word.startsWith("-")) {
+			const eq = word.indexOf("=");
+			const flag = eq === -1 ? word : word.slice(0, eq);
+			const value = eq === -1 ? words[i + 1] : word.slice(eq + 1);
+			const refFlag = Object.hasOwn(REF_VALUE_FLAGS, flag);
+			if (refFlag) out.refs.push(...(value ?? "").split(",").filter(isShortOrProjectRef));
+			else if (flag === "--project" && value) out.projects.push(value);
+			if (eq === -1 && (refFlag || takesValue(word))) i++;
+			if (taken > 0) rule = undefined;
+			continue;
+		}
+		if (sub === undefined) {
+			sub = word;
+			out.subcommands.push(sub);
+			rule = Object.hasOwn(REF_POSITIONALS, sub) ? REF_POSITIONALS[sub] : undefined;
+			continue;
+		}
+		if (!rule) continue;
+		if (skipped < rule.skip) {
+			skipped++;
+			continue;
+		}
+		if (!isShortOrProjectRef(word)) {
+			rule = undefined;
+			continue;
+		}
+		out.refs.push(word);
+		taken++;
+		if (!rule.many) rule = undefined;
+	}
+	// `<project>#<id>` counts in any argument, flag values and message text included.
+	for (const word of words.slice(start)) {
+		for (const ref of projectRefsIn(word)) out.refs.push(`${ref.project}#${ref.id}`);
+	}
+}
+
+/** Subcommands, ref arguments and `--project` names of every kata invocation in a bash command. */
+export function kataMentions(command: string, names: readonly string[] = ["kata"]): KataMentions {
+	const nameSet = new Set(names);
+	const out: KataMentions = { subcommands: [], refs: [], projects: [] };
+	for (const words of tokenizeCommand(command)) collectMentions(words, nameSet, out);
+	return { ...out, refs: unique(out.refs) };
+}
+
+const GIT = new Set(["git"]);
+/** git global options that consume the following word. */
+const GIT_VALUE_OPTIONS: Record<string, true> = {
+	"-C": true,
+	"-c": true,
+	"--git-dir": true,
+	"--work-tree": true,
+	"--namespace": true,
+	"--config-env": true,
+	"--super-prefix": true,
+};
+/** `git commit` long options that consume the following word (when not written as `--opt=value`). */
+const COMMIT_VALUE_OPTIONS: Record<string, true> = {
+	"--author": true,
+	"--cleanup": true,
+	"--date": true,
+	"--file": true,
+	"--fixup": true,
+	"--message": true,
+	"--pathspec-from-file": true,
+	"--reedit-message": true,
+	"--reuse-message": true,
+	"--squash": true,
+	"--template": true,
+	"--trailer": true,
+};
+/** `git commit` short options taking a value, attached (`-mmsg`) or as the next word; they may end a cluster (`-am`). */
+const COMMIT_SHORT_VALUE: Record<string, string> = { m: "--message", F: "--file", C: "--reuse-message", c: "--reedit-message", t: "--template" };
+
+/** Message parts of one `git commit` segment; `stdin` is set when the message is read from standard input. */
+function commitSegment(words: string[], state: { messages: string[]; stdin: boolean }): void {
+	let i = findCommandWord(words, GIT);
+	if (i === -1) return;
+	for (i++; i < words.length; i++) {
+		const word = words[i] as string;
+		if (!word.startsWith("-")) break;
+		if (Object.hasOwn(GIT_VALUE_OPTIONS, word)) i++;
+	}
+	if (words[i] !== "commit") return;
+	const apply = (option: string, value: string | undefined) => {
+		if (value === undefined) return;
+		if (option === "--message" || option === "--trailer") state.messages.push(value);
+		else if (option === "--file" && (value === "-" || value === "/dev/stdin")) state.stdin = true;
+	};
+	for (i++; i < words.length; i++) {
+		const word = words[i] as string;
+		if (word === "--") break;
+		if (word.startsWith("--")) {
+			const eq = word.indexOf("=");
+			const option = eq === -1 ? word : word.slice(0, eq);
+			if (!Object.hasOwn(COMMIT_VALUE_OPTIONS, option)) continue;
+			if (eq !== -1) apply(option, word.slice(eq + 1));
+			else apply(option, words[++i]);
+		} else if (word.startsWith("-")) {
+			for (let j = 1; j < word.length; j++) {
+				const option = COMMIT_SHORT_VALUE[word[j] as string];
+				if (option === undefined) continue;
+				const attached = word.slice(j + 1);
+				apply(option, attached !== "" ? attached : words[++i]);
+				break;
+			}
+		}
+	}
+}
+
+const HEREDOC = /(?<!<)<<(?!<)(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/g;
+
+/** Bodies of the here-documents in a command (`<<EOF`, `<<-'EOF'`, ...). */
+function heredocBodies(command: string): string[] {
+	const bodies: string[] = [];
+	for (const match of command.matchAll(HEREDOC)) {
+		const start = command.indexOf("\n", (match.index ?? 0) + match[0].length);
+		if (start === -1) continue;
+		const body: string[] = [];
+		for (const line of command.slice(start + 1).split("\n")) {
+			if ((match[1] ? line.replace(/^\t+/, "") : line) === match[3]) break;
+			body.push(line);
+		}
+		bodies.push(body.join("\n"));
+	}
+	return bodies;
+}
+
+/**
+ * Commit message text a bash command hands to `git commit`: `-m`/`--message` and `--trailer` values,
+ * plus the command's here-document bodies when the message is read from stdin (`-F-`, `--file=-`).
+ */
+export function gitCommitMessages(command: string): string[] {
+	const state = { messages: [] as string[], stdin: false };
+	for (const words of tokenizeCommand(command)) commitSegment(words, state);
+	return state.stdin ? [...state.messages, ...heredocBodies(command)] : state.messages;
 }

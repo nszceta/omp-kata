@@ -66,6 +66,12 @@
         "type": "boolean",
         "default": true,
         "description": "Give each agent its own kata identity (actor/teammate/inbox address) via a PATH shim; false leaves kata untouched"
+      },
+      "refGuard": {
+        "type": "enum",
+        "values": ["block", "warn", "off"],
+        "default": "block",
+        "description": "Kata refs written into repository content (files, commit messages): block refuses the tool call, warn lets it run with a warning, off disables the check"
       }
     },
     "description": "kata issue-tracker integration for omp: agent contract, per-agent identity, inbox delivery, attention lifecycle"

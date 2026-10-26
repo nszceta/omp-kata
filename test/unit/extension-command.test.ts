@@ -53,6 +53,7 @@ describe("/kata status", () => {
 			wakeOnInbox: false,
 			attention: true,
 			identity: true,
+			refGuard: "block",
 		});
 	});
 

@@ -139,23 +139,29 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 
 		// Identity reaches kata through the PATH shim, not through the command text. This only makes sure
 		// the session's identity file exists before the first command runs (it can be missing when
-		// `kata whoami` failed earlier or the session id changed).
+		// `kata whoami` failed earlier or the session id changed). The ref guard then vets every call.
 		pi.on("tool_call", async (event, ctx) => {
-			if (event.toolName !== "bash") return undefined;
-			await (await runtimeFor(ctx))?.syncIdentity(sessionId(ctx));
-			return undefined;
+			const rt = await runtimeFor(ctx);
+			if (!rt) return undefined;
+			if (event.toolName === "bash") await rt.syncIdentity(sessionId(ctx));
+			// Tool inputs are plain JSON objects; the guard reads only the fields it knows per tool.
+			const reason = rt.guardToolCall(event.toolCallId, event.toolName, event.input as Record<string, unknown>, ctx.cwd);
+			return reason === undefined ? undefined : { block: true, reason };
 		});
 
 		pi.on("tool_result", async (event, ctx) => {
 			const rt = await runtimeFor(ctx);
 			if (!rt) return undefined;
-			if (event.toolName === "bash" && !event.isError && (await rt.trackBash(event.input.command, sessionId(ctx)))) {
-				await refreshStatus(ctx, rt);
+			if (event.toolName === "bash" && !event.isError) {
+				const output = event.content.map(part => (part.type === "text" ? part.text : "")).join("\n");
+				rt.observeBashOutput(event.input.command, output);
+				if (await rt.trackBash(event.input.command, sessionId(ctx))) await refreshStatus(ctx, rt);
 			}
+			const warning = rt.takeRefWarning(event.toolCallId);
 			const inbox = await rt.inboxForToolResult();
-			if (inbox === undefined) return undefined;
-			await refreshStatus(ctx, rt);
-			return { additionalContext: inbox };
+			if (inbox !== undefined) await refreshStatus(ctx, rt);
+			const context = [warning, inbox].filter((text): text is string => text !== undefined);
+			return context.length === 0 ? undefined : { additionalContext: context.join("\n\n") };
 		});
 
 		registerKataCommand(

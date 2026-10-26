@@ -43,6 +43,7 @@ Set plugin settings with `omp plugin config set omp-kata <key> <value>`. Setting
 | `wakeOnInbox` | `OMP_KATA_WAKE_ON_INBOX` | boolean | `false` | idle main session starts a turn when new requests arrive instead of only notifying |
 | `attention` | `OMP_KATA_ATTENTION` | boolean | `true` | attention lifecycle |
 | `identity` | `OMP_KATA_IDENTITY` | boolean | `true` | per-agent kata identity via the `PATH` shim; `false` leaves kata completely untouched (the shim passes through) |
+| `refGuard` | `OMP_KATA_REF_GUARD` | `block` \| `warn` \| `off` | `block` | stop kata issue refs from being written into repository content (see [Ref hygiene](#ref-hygiene)) |
 
 Booleans accept `true`/`false`/`1`/`0`.
 
@@ -99,6 +100,18 @@ With a UI, the footer shows `kata <inbox user>`, plus ` · <tracked refs>` and `
 ### `/kata-run <project> [label]`
 
 Markdown slash command (`commands/kata-run.md`, discovered from the linked plugin root). It prompts the agent to loop `kata next --project <project> --unowned` (filtered by `--label` when given) → claim → follow body and comments → verify → close, leaving parents with open children for last, flagging blocked issues `needs-human`/`stuck`, and fanning independent issues out to subagents, until the ready queue is empty. Without a label it works every ready issue in the project. Each fanned-out subagent gets a tier chosen per issue: ordinary issues omit `model`, so omp's subagent settings apply (`task.agentModelOverrides`, then `modelRoles.task`); narrowly specified mechanical issues get `@smol`; open-ended or cross-cutting ones get `@slow`. When unsure the agent takes the higher tier, it never passes a concrete model id, and a child that fails at its tier is re-spawned one tier up before the issue is left `needs-human`.
+
+### Ref hygiene
+
+Kata refs are handles that only work with the local tracker. Links go one way: kata issues cite commits and doc paths, and repository content never cites kata issues. The omp addendum, `/kata-run` and the `kata` skill all tell agents this.
+
+The `refGuard` setting enforces it on `tool_call`. It checks:
+
+- `write` content and `edit` `+` lines for files in the workspace;
+- `ast_edit` replacement text for paths in the workspace;
+- `git commit` messages given with `-m` or `-F-`.
+
+It flags `<project>#<id>` and bare short ids that the session has already seen in kata commands or their output. Ids the session has not seen pass, so ordinary 4-character tokens are not caught. With `block`, the call is refused. With `warn`, it goes through with a warning. Files written by shell redirection or `eval` are not checked.
 
 ## Why no MCP server
 

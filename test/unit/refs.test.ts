@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { isIssueRef, parseClaimRefs, parseCloseRefs, parseRefEvents, tokenizeCommand } from "../../src/refs";
+import {
+	gitCommitMessages,
+	isIssueRef,
+	kataMentions,
+	parseClaimRefs,
+	parseCloseRefs,
+	parseRefEvents,
+	projectRefsIn,
+	tokenizeCommand,
+} from "../../src/refs";
 
 const ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
@@ -236,5 +245,70 @@ describe("shell constructs that must not leak words into the outer command", () 
 
 	test("a closing paren of a subshell does not hide the last ref", () => {
 		expect(parseClaimRefs("(cd x && kata claim abcd)")).toEqual(["abcd"]);
+	});
+});
+
+describe("kataMentions", () => {
+	test("ref positionals per subcommand; subcommand and action words are never refs", () => {
+		expect(kataMentions("kata show q7x2 --json && kata claim a1b2 c3d4 --agent && kata label add e5f6 needs-review")).toEqual({
+			subcommands: ["show", "claim", "label"],
+			refs: ["q7x2", "a1b2", "c3d4", "e5f6"],
+			projects: [],
+		});
+	});
+
+	test("meta values, search queries and create titles are not refs", () => {
+		expect(kataMentions('kata meta set q7x2 someday true && kata search "auth" && kata create "fix" --body "text"').refs).toEqual(["q7x2"]);
+	});
+
+	test("ref-valued flags, --project names and <project>#<id> anywhere in kata args", () => {
+		expect(
+			kataMentions('kata --project other create "x" --parent a1b2 --blocked-by=c3d4,e5f6 && kata comment g7h8 -m "dup of ws#j9k1"'),
+		).toEqual({
+			subcommands: ["create", "comment"],
+			refs: ["a1b2", "c3d4", "e5f6", "g7h8", "ws#j9k1"],
+			projects: ["other"],
+		});
+	});
+
+	test("non-kata commands contribute nothing", () => {
+		expect(kataMentions("git show q7x2 && echo ws#j9k1")).toEqual({ subcommands: [], refs: [], projects: [] });
+	});
+});
+
+describe("projectRefsIn", () => {
+	test("finds <project>#<id> in text but not URL fragments or key=a#b values", () => {
+		expect(projectRefsIn("see ws#q7x2, other.proj#a1b2; http://h/kata?issue=01AB#direct=1 x=y#abcd1")).toEqual([
+			{ project: "ws", id: "q7x2" },
+			{ project: "other.proj", id: "a1b2" },
+		]);
+	});
+});
+
+describe("gitCommitMessages", () => {
+	test("-m, --message, attached and clustered forms, --trailer", () => {
+		expect(gitCommitMessages('git commit -m "one" --message=two -mthree -am four --trailer "Refs: five" --author "A <a@b>"')).toEqual([
+			"one",
+			"two",
+			"three",
+			"four",
+			"Refs: five",
+		]);
+	});
+
+	test("git global options before commit; other subcommands are ignored", () => {
+		expect(gitCommitMessages('git -C repo -c a=b commit -m msg && git tag -m nope v1 && git log -m')).toEqual(["msg"]);
+	});
+
+	test("heredoc bodies count only when the message comes from stdin", () => {
+		const stdin = "git commit -F- <<'EOF'\nsubject\n\nbody line\nEOF\necho done";
+		expect(gitCommitMessages(stdin)).toEqual(["subject\n\nbody line"]);
+		expect(gitCommitMessages("git commit --file=- <<-EOF\n\tsubject\n\tEOF")).toEqual(["\tsubject"]);
+		expect(gitCommitMessages("cat <<'EOF' > f\nsubject\nEOF\ngit commit -m x")).toEqual(["x"]);
+	});
+
+	test("a $(cat <<EOF ...) message keeps its body in the -m value", () => {
+		const [message] = gitCommitMessages(`git commit -m "$(cat <<'EOF'\nsubject q7x2\nEOF\n)"`);
+		expect(message).toContain("subject q7x2");
 	});
 });

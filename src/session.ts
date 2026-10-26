@@ -3,11 +3,12 @@ import { AttentionTracker } from "./attention";
 import { type Env, type KataSettings, resolveSettings, type SettingsLoader } from "./config";
 import { type ContractResult, getContract, ompAddendum, withContract } from "./contract";
 import { type AgentIdentity, deriveIdentity, type Identity, lookupActor } from "./identity";
+import { RefGuard, refFindingReason } from "./guard";
 import { type IdleOutcome, InboxTracker } from "./inbox";
 import { KataCli } from "./kata";
 import type { ShimHost } from "./shim";
 import type { StatusInfo } from "./status";
-import { findWorkspaceRoot } from "./workspace";
+import { findWorkspaceRoot, readProjectName } from "./workspace";
 
 export interface RuntimeDeps {
 	env: Env;
@@ -39,6 +40,9 @@ export class KataRuntime {
 	private readonly published = new Set<string>();
 	/** Absolute path of the real kata (never the shim). */
 	readonly real: string;
+	readonly refGuard: RefGuard;
+	/** Ref-guard warnings (warn mode) waiting for their tool result, by tool call id. */
+	private readonly refWarnings = new Map<string, string>();
 
 	constructor(
 		readonly root: string,
@@ -49,6 +53,8 @@ export class KataRuntime {
 		this.real = deps.shim.resolveReal(settings.executable);
 		this.cli = new KataCli(this.real, deps.env);
 		this.attention = new AttentionTracker(this.cli, root, deps.hostPid);
+		this.refGuard = new RefGuard(root, readProjectName(root), this.kataNames);
+		if (deps.env.KATA_REF) this.refGuard.see(deps.env.KATA_REF);
 	}
 
 	/** Undefined when `cwd` is not inside a kata workspace: the whole plugin stays inert. */
@@ -173,5 +179,31 @@ export class KataRuntime {
 	async trackBash(command: unknown, sessionId: string): Promise<boolean> {
 		if (!this.settings.attention || typeof command !== "string") return false;
 		return this.attention.applyCommand(command, sessionId, this.kataNames);
+	}
+
+	/**
+	 * Block reason when the tool call would write a kata ref into repository content. In warn mode the
+	 * call runs and the same text waits for its tool result (see takeRefWarning).
+	 */
+	guardToolCall(toolCallId: string, toolName: string, input: Record<string, unknown>, cwd: string): string | undefined {
+		if (this.settings.refGuard === "off") return undefined;
+		const finding = this.refGuard.check(toolName, input, cwd);
+		if (!finding) return undefined;
+		const reason = refFindingReason(finding);
+		if (this.settings.refGuard === "block") return reason;
+		this.refWarnings.set(toolCallId, reason);
+		return undefined;
+	}
+
+	takeRefWarning(toolCallId: string): string | undefined {
+		const warning = this.refWarnings.get(toolCallId);
+		this.refWarnings.delete(toolCallId);
+		return warning;
+	}
+
+	/** Learns the issue ids a successful kata listing command printed. */
+	observeBashOutput(command: unknown, output: string): void {
+		if (this.settings.refGuard === "off" || typeof command !== "string") return;
+		this.refGuard.observeOutput(command, output);
 	}
 }
