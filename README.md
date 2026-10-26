@@ -98,7 +98,7 @@ With a UI, the footer shows `kata <inbox user>`, plus ` · <tracked refs>` and `
 
 ### `/kata-run <project> [label]`
 
-Markdown slash command (`commands/kata-run.md`, discovered from the linked plugin root). It prompts the agent to loop `kata next --project <project> --unowned` (filtered by `--label` when given) → claim → follow body and comments → verify → close, leaving parents with open children for last, flagging blocked issues `needs-human`/`stuck`, and fanning independent issues out to subagents, until the ready queue is empty. Without a label it works every ready issue in the project.
+Markdown slash command (`commands/kata-run.md`, discovered from the linked plugin root). It prompts the agent to loop `kata next --project <project> --unowned` (filtered by `--label` when given) → claim → follow body and comments → verify → close, leaving parents with open children for last, flagging blocked issues `needs-human`/`stuck`, and fanning independent issues out to subagents, until the ready queue is empty. Without a label it works every ready issue in the project. Each fanned-out subagent gets a tier chosen per issue: ordinary issues omit `model`, so omp's subagent settings apply (`task.agentModelOverrides`, then `modelRoles.task`); narrowly specified mechanical issues get `@smol`; open-ended or cross-cutting ones get `@slow`. When unsure the agent takes the higher tier, it never passes a concrete model id, and a child that fails at its tier is re-spawned one tier up before the issue is left `needs-human`.
 
 ## Why no MCP server
 

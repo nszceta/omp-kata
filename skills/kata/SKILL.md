@@ -39,7 +39,11 @@ re-read or restate the contract.
    The ref is `.issue.short_id` in the JSON. Re-running with the same key is safe.
 2. Spawn the `task` agent with the **child ref** in the assignment and tell it to `kata claim <child-ref>`
    first, keep `work.attention`/`work.attention_msg` current, and `kata close` with evidence when done.
-   Give it the full context; it does not see this conversation.
+   Give it the full context; it does not see this conversation. Choose its model tier from the issue body:
+   omit the task item's `model` for ordinary implementation (omp then applies `task.agentModelOverrides`,
+   then `modelRoles.task`); `model: "@smol"` only when the body names the exact change and it needs no
+   design or investigation; `model: "@slow"` for open-ended design, debugging without a repro, or changes
+   spanning several subsystems. When unsure, take the higher tier. Never pass a concrete `provider/model` id.
 3. Wait without blocking your own work: run
    `kata wait <child-refs> --until attention --any --timeout 10m`
    as an async bash job. It returns when any child sets a non-`ok` attention (`needs-human`, `stuck`) or closes
@@ -50,7 +54,8 @@ re-read or restate the contract.
 5. Read delegated state, never write it: the child owns `work.*` metadata (`work.attention`, `work.attention_msg`, ...) on its
    issue, so only read it (`kata meta get`, `kata show`). Review its diff and evidence, then close the parent with your own evidence.
 6. A child that ended without closing is marked `needs-human` by this plugin. Inspect before trusting
-   any partial work.
+   any partial work. If it failed because the work was harder than its tier, re-spawn one tier up before
+   taking the work back.
 
 ## Quick notes
 

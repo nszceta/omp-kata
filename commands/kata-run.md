@@ -11,5 +11,12 @@ Loop:
 4. Do the work, verify it, then `kata close <ref> --project $1 --done -m "<scope and verification>" <evidence> --agent`.
 5. If blocked, set `work.attention` to `needs-human` or `stuck` with `work.attention_msg`, then move on.
 
-Independent ready issues: fan out to parallel subagents, one issue each.
+Independent ready issues: fan out to parallel subagents, one issue each. Choose each subagent's model tier from the issue body:
+- Ordinary implementation: omit the task item's `model`, so omp applies the configured subagent model (`task.agentModelOverrides`, then `modelRoles.task`).
+- `model: "@smol"`: only when the body names the exact change (files, symbols, values) and it needs no design or investigation.
+- `model: "@slow"`: open-ended design, debugging without a repro, or changes spanning several subsystems.
+
+When unsure between two tiers, take the higher one. Never pass a concrete `provider/model` id: it drops the role.
+If a subagent ends without closing its issue because the work was harder than its tier (not because it needs human input), re-spawn it one tier up with the issue's comments and `work.attention_msg` as context before leaving it `needs-human`.
+
 When the queue is empty, report what was closed and anything still needing attention.
