@@ -134,3 +134,17 @@ describe("prefix composition is applied exactly once", () => {
 		expect(env.PI_SHELL_PREFIX).toBe("strace -f");
 	});
 });
+
+describe("an omp started from an omp bash command", () => {
+	test("drops the enclosing process's shim, state and prefix but keeps the user's own", () => {
+		const outer = "/tmp/omp-kata-111-aBc123/bin";
+		const env: Env = {
+			PATH: `${outer}:/usr/local/bin:/home/u/bin:/usr/bin`,
+			OMP_KATA_STATE_DIR: "/tmp/omp-kata-111-aBc123",
+			OMP_KATA_REAL: "/usr/local/bin/kata",
+			PI_SHELL_PREFIX: composeShellPrefix(outer, "source ~/.venv"),
+		};
+		new ShimHost(env);
+		expect(env).toEqual({ PATH: "/usr/local/bin:/home/u/bin:/usr/bin", PI_SHELL_PREFIX: "source ~/.venv" });
+	});
+});

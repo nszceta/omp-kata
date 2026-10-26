@@ -1,6 +1,6 @@
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Env } from "./config";
 import { type Identity, shellQuote } from "./identity";
@@ -89,6 +89,26 @@ export function stripShellPrefix(value: string | undefined): string {
 }
 
 /**
+ * Removes the shim of an enclosing omp (omp run from an omp bash command): its PATH entry, state
+ * variables and shell prefix. Left in place they would route this process's kata calls through the
+ * outer process's shim, even with `identity` off.
+ */
+export function detachInheritedShim(env: Env): void {
+	// Shim dirs are `<root>/omp-kata-<pid>-XXXXXX/bin`.
+	const isShimDir = (dir: string) => basename(dir) === "bin" && STATE_DIR_NAME.test(basename(dirname(dir)));
+	if (env.PATH !== undefined) env.PATH = env.PATH.split(delimiter).filter(dir => !isShimDir(dir)).join(delimiter);
+	delete env.OMP_KATA_STATE_DIR;
+	delete env.OMP_KATA_REAL;
+	for (const name of ["PI_SHELL_PREFIX", "CLAUDE_CODE_SHELL_PREFIX"] as const) {
+		const value = env[name];
+		if (value === undefined) continue;
+		const user = stripShellPrefix(value);
+		if (user === "") delete env[name];
+		else env[name] = user;
+	}
+}
+
+/**
  * Delivers per-session kata identity without touching command text. A private per-process state
  * directory holds one env file per omp session id, and a `kata` shim script in a directory prepended
  * to PATH reads the file selected by PI_SESSION_ID (which omp sets for every bash command).
@@ -103,7 +123,9 @@ export class ShimHost {
 	constructor(
 		private readonly env: Env,
 		private readonly options: { tmpRoot?: string; shimSource?: string } = {},
-	) {}
+	) {
+		detachInheritedShim(env);
+	}
 
 	private ensureDirs(): { stateDir: string; shimDir: string } {
 		if (!this.stateDir || !this.shimDir) {
