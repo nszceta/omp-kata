@@ -39,11 +39,10 @@ re-read or restate the contract.
    The ref is `.issue.short_id` in the JSON. Re-running with the same key is safe.
 2. Spawn the `task` agent with the **child ref** in the assignment and tell it to `kata claim <child-ref>`
    first, keep `work.attention`/`work.attention_msg` current, and `kata close` with evidence when done.
-   Give it the full context; it does not see this conversation. Choose its model tier from the issue body:
-   omit the task item's `model` for ordinary implementation (omp then applies `task.agentModelOverrides`,
-   then `modelRoles.task`); `model: "@smol"` only when the body names the exact change and it needs no
-   design or investigation; `model: "@slow"` for open-ended design, debugging without a repro, or changes
-   spanning several subsystems. When unsure, take the higher tier. Never pass a concrete `provider/model` id.
+   Give it the full context; it does not see this conversation. Choose its agent from the issue body:
+   `agent: "sonic"` only when the body names the exact change and it needs no design or investigation;
+   otherwise omit `agent` (default `task`). Never pass `model` on a task item: omp rejects it for every
+   agent except `seance`; models come from omp's `task.agentModelOverrides` and `modelRoles` settings.
    The ref is for kata commands only: tell the child not to cite it in code, docs, file names, or commit
    messages, and to record commit SHAs and doc paths on the issue instead.
    If siblings run in parallel and may touch the same file, tell each one which files overlap and the
@@ -58,8 +57,8 @@ re-read or restate the contract.
 5. Read delegated state, never write it: the child owns `work.*` metadata (`work.attention`, `work.attention_msg`, ...) on its
    issue, so only read it (`kata meta get`, `kata show`). Review its diff and evidence, then close the parent with your own evidence.
 6. A child that ended without closing is marked `needs-human` by this plugin. Inspect before trusting
-   any partial work. If it failed because the work was harder than its tier, re-spawn one tier up before
-   taking the work back.
+   any partial work. If a `sonic` child failed because the work needed design or investigation, re-spawn
+   it as `task` before taking the work back.
 
 ## Quick notes
 
