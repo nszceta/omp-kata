@@ -8,7 +8,7 @@ import { clearContractCache } from "../../src/contract";
 import { clearActorCache } from "../../src/identity";
 import { ShimHost } from "../../src/shim";
 import { bashCall, bashResult, FakeCtx, type FakeHost, loadExtension, REAL_KATA, RealKata, tempDir } from "./helpers";
-import { prompt } from "./extension-harness";
+import { MAIN_TAIL, prompt } from "./extension-harness";
 
 const rk = new RealKata("unit-actor");
 const tmpRoot = tempDir("omp-kata-shimroot-");
@@ -95,11 +95,7 @@ describe("real kata through the extension", () => {
 		const block = result?.systemPrompt?.[2] ?? "";
 		expect(block).toStartWith(`<kata_contract>\n${hook.hookSpecificOutput.additionalContext}\nomp-kata: omp sets kata identity automatically`);
 		expect(block).toStartWith("<kata_contract>\nKata is the system of record for intent.");
-		expect(block).toEndWith(
-			"\nidentity: actor=unit-actor teammate=(none) inbox=unit-actor\n" +
-				"Attention starts automatically on `kata claim` and ends when the session ends; inbox requests arrive as <kata_inbox> messages.\n" +
-				"Kata refs (<project>#<id> or bare short ids) are tracker-local handles. NEVER write them into repository content: source, tests, docs, config, file or directory names, scratch paths, or commit messages. Describe the problem in words in the repo. Link the other way: record commit SHAs and doc paths on the issue (`kata comment`, `--evidence commit:<sha>`).\n</kata_contract>",
-		);
+		expect(block).toEndWith(`\nidentity: actor=unit-actor teammate=(none) inbox=unit-actor\n${MAIN_TAIL}\n</kata_contract>`);
 	}, 30_000);
 
 	test("the PATH shim attributes comments to the subagent, even after a model-authored export; the main agent gets no teammate", async () => {

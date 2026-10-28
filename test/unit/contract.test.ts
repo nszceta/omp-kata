@@ -275,6 +275,14 @@ describe("ompAddendum", () => {
 		expect(ompAddendum(undefined).split("\n")).toHaveLength(3);
 	});
 
+	test("only the main agent is told to close verified issues as it goes", () => {
+		const identity = { actor: "adam", teammate: "", inboxUser: "adam" };
+		const main = ompAddendum(identity, true);
+		expect(main.startsWith(`${ompAddendum(identity)}\nMain agent: `)).toBe(true);
+		expect(main).toContain("ONLY after verifying");
+		expect(ompAddendum(identity, false)).not.toContain("Main agent");
+	});
+
 	test("does not describe an export preamble or shell history", () => {
 		for (const text of [ompAddendum({ actor: "adam", teammate: "bob", inboxUser: "adam/bob" }), ompAddendum(undefined)]) {
 			expect(text).not.toContain("preamble");

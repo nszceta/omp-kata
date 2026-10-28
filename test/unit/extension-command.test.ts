@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { FAKE_KATA, bashCall, bashResult } from "./helpers";
 import {
 	ADDENDUM_HEAD,
-	ADDENDUM_TAIL,
+	MAIN_TAIL,
 	CONTRACT_BLOCK,
 	contractBlockOf,
 	identityFileText,
@@ -141,7 +141,7 @@ describe("/kata refresh", () => {
 			"base B",
 			contractBlockOf(
 				"NEW CONTRACT",
-				`${ADDENDUM_HEAD}\nidentity: actor=newuser teammate=(none) inbox=newuser\n${ADDENDUM_TAIL}`,
+				`${ADDENDUM_HEAD}\nidentity: actor=newuser teammate=(none) inbox=newuser\n${MAIN_TAIL}`,
 			),
 		]);
 		expect(rig.readIdentity(SESSION)).toBe(identityFileText("", "fakeuser").replaceAll("fakeuser", "newuser"));

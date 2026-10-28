@@ -7,6 +7,7 @@ import {
 	CONTRACT_BLOCK,
 	contractBlockOf,
 	MAIN_ADDENDUM,
+	MAIN_TAIL,
 	prompt,
 	Rig,
 	subContractBlock,
@@ -150,7 +151,7 @@ describe("omp addendum in the contract block", () => {
 				"FAKE CONTRACT TEXT",
 				ADDENDUM_HEAD,
 				"identity: actor=fakeuser teammate=(none) inbox=fakeuser",
-				ADDENDUM_TAIL,
+				MAIN_TAIL,
 				"</kata_contract>",
 			].join("\n"),
 		);
@@ -161,7 +162,7 @@ describe("omp addendum in the contract block", () => {
 
 		const result = await prompt(host, rig.session());
 
-		expect(result?.systemPrompt?.[2]).toBe(contractBlockOf("FAKE CONTRACT TEXT", addendum("alice", "fakeuser/alice")));
+		expect(result?.systemPrompt?.[2]).toBe(contractBlockOf("FAKE CONTRACT TEXT", addendum("alice", "fakeuser/alice", true)));
 	});
 
 	test("subagent: teammate is its id and inbox is actor/id, regardless of the main agent's env", async () => {
@@ -210,6 +211,6 @@ describe("omp addendum in the contract block", () => {
 
 		const result = await prompt(host, rig.session());
 
-		expect(result?.systemPrompt?.[2]).toBe(`<kata_contract>\nFAKE CONTRACT TEXT\n${ADDENDUM_HEAD}\n${ADDENDUM_TAIL}\n</kata_contract>`);
+		expect(result?.systemPrompt?.[2]).toBe(`<kata_contract>\nFAKE CONTRACT TEXT\n${ADDENDUM_HEAD}\n${MAIN_TAIL}\n</kata_contract>`);
 	});
 });

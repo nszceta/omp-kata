@@ -66,7 +66,7 @@ Identity is applied at exec time, so a model-authored `export KATA_AUTHOR=…` b
 
 Subagents never read `KATA_TEAMMATE`, `KATA_INBOX_USER` or `KATA_REF` from the environment (they are shared with the main agent). A teammate-less identity unsets `KATA_TEAMMATE` (kata treats an empty value like an unset one — verified). With `identity=false` no file is written and nothing about kata changes.
 
-The contract block injected into the system prompt ends with a short omp addendum giving this agent's actor/teammate/inbox address and telling agents not to export those variables or put them in task assignments.
+The contract block injected into the system prompt ends with a short omp addendum giving this agent's actor/teammate/inbox address and telling agents not to export those variables or put them in task assignments. For the main agent only, it adds a line telling it to keep kata current as it works: close each issue its work resolves right away with evidence, but only after verifying every acceptance criterion; unverified or partial work gets a progress comment instead.
 
 ### Inbox
 

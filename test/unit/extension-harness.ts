@@ -28,13 +28,15 @@ export const ADDENDUM_HEAD =
 	"omp-kata: omp sets kata identity automatically for every agent in every bash command. Do NOT export KATA_AUTHOR, KATA_TEAMMATE or KATA_INBOX_USER yourself and do NOT put them in task assignments.";
 export const ADDENDUM_TAIL =
 	"Attention starts automatically on `kata claim` and ends when the session ends; inbox requests arrive as <kata_inbox> messages.\nKata refs (<project>#<id> or bare short ids) are tracker-local handles. NEVER write them into repository content: source, tests, docs, config, file or directory names, scratch paths, or commit messages. Describe the problem in words in the repo. Link the other way: record commit SHAs and doc paths on the issue (`kata comment`, `--evidence commit:<sha>`).";
+/** Tail of the main agent's addendum: the shared tail plus the main-only tracker-upkeep line. */
+export const MAIN_TAIL = `${ADDENDUM_TAIL}\nMain agent: keep kata current as you work, not only at the end. Whenever work you did or reviewed resolves an open issue, close it right away with evidence, but ONLY after verifying it: every acceptance criterion in the body and comments is met and you observed proof (test run, command output, commit SHA, reviewed subagent diff). Partial, unverified, or merely claimed work stays open: comment progress instead. Check open children before closing a parent.`;
 
 /** The omp addendum for actor `fakeuser`, with the given teammate text and inbox address. */
-export function addendum(teammate: string, inbox: string): string {
-	return `${ADDENDUM_HEAD}\nidentity: actor=fakeuser teammate=${teammate} inbox=${inbox}\n${ADDENDUM_TAIL}`;
+export function addendum(teammate: string, inbox: string, main = false): string {
+	return `${ADDENDUM_HEAD}\nidentity: actor=fakeuser teammate=${teammate} inbox=${inbox}\n${main ? MAIN_TAIL : ADDENDUM_TAIL}`;
 }
 
-export const MAIN_ADDENDUM = addendum("(none)", "fakeuser");
+export const MAIN_ADDENDUM = addendum("(none)", "fakeuser", true);
 
 export function contractBlockOf(text: string, addendumText: string): string {
 	return `<kata_contract>\n${text}\n${addendumText}\n</kata_contract>`;

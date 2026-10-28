@@ -130,7 +130,7 @@ export class KataRuntime {
 		// Identity first: the addendum states this agent's identity, and the block must be stable across prompts.
 		const [result, identity] = await Promise.all([getContract(this.cli, this.settings, this.root), this.identity()]);
 		this.lastContract = result;
-		const next = withContract(systemPrompt, result, ompAddendum(identity));
+		const next = withContract(systemPrompt, result, ompAddendum(identity, this.agent.kind === "main"));
 		return { systemPrompt: next, failure: result.ok ? undefined : result.reason };
 	}
 

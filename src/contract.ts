@@ -56,9 +56,10 @@ export function clearContractCache(root?: string): void {
 
 /**
  * omp-specific notes appended inside the contract block. Identity is set by the plugin for every kata
- * invocation, so agents must not set it themselves (it would be ignored and confuse attribution). The text is constant for a session, which keeps the system prompt cache-stable.
+ * invocation, so agents must not set it themselves (it would be ignored and confuse attribution). The main
+ * agent additionally owns tracker upkeep. The text is constant for a session, which keeps the system prompt cache-stable.
  */
-export function ompAddendum(identity: Identity | undefined): string {
+export function ompAddendum(identity: Identity | undefined, main = false): string {
 	return [
 		"omp-kata: omp sets kata identity automatically for every agent in every bash command. Do NOT export KATA_AUTHOR, KATA_TEAMMATE or KATA_INBOX_USER yourself and do NOT put them in task assignments.",
 		...(identity
@@ -66,6 +67,11 @@ export function ompAddendum(identity: Identity | undefined): string {
 			: []),
 		"Attention starts automatically on `kata claim` and ends when the session ends; inbox requests arrive as <kata_inbox> messages.",
 		"Kata refs (<project>#<id> or bare short ids) are tracker-local handles. NEVER write them into repository content: source, tests, docs, config, file or directory names, scratch paths, or commit messages. Describe the problem in words in the repo. Link the other way: record commit SHAs and doc paths on the issue (`kata comment`, `--evidence commit:<sha>`).",
+		...(main
+			? [
+					"Main agent: keep kata current as you work, not only at the end. Whenever work you did or reviewed resolves an open issue, close it right away with evidence, but ONLY after verifying it: every acceptance criterion in the body and comments is met and you observed proof (test run, command output, commit SHA, reviewed subagent diff). Partial, unverified, or merely claimed work stays open: comment progress instead. Check open children before closing a parent.",
+				]
+			: []),
 	].join("\n");
 }
 
