@@ -18,6 +18,7 @@ Independent ready issues: fan out to parallel subagents, one issue each. Choose 
 
 When unsure between two tiers, take the higher one. Never pass a concrete `provider/model` id: it drops the role.
 If a subagent ends without closing its issue because the work was harder than its tier (not because it needs human input), re-spawn it one tier up with the issue's comments and `work.attention_msg` as context before leaving it `needs-human`.
+Siblings that touch the same file must coordinate over IRC (`write agent://<id>`) before editing it; name the shared files and each sibling's id in their assignments so they know whom to message.
 
 Issue refs belong in kata commands only. Never cite them in deliverables (code, tests, docs, file or directory names, commit messages), and do not ask subagents to; describe the change in words, and record commit SHAs and doc paths on the issue instead.
 

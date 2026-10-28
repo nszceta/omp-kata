@@ -46,6 +46,8 @@ re-read or restate the contract.
    spanning several subsystems. When unsure, take the higher tier. Never pass a concrete `provider/model` id.
    The ref is for kata commands only: tell the child not to cite it in code, docs, file names, or commit
    messages, and to record commit SHAs and doc paths on the issue instead.
+   If siblings run in parallel and may touch the same file, tell each one which files overlap and the
+   sibling agent ids, and have them coordinate over IRC (`write agent://<id>`) before editing a shared file.
 3. Wait without blocking your own work: run
    `kata wait <child-refs> --until attention --any --timeout 10m`
    as an async bash job. It returns when any child sets a non-`ok` attention (`needs-human`, `stuck`) or closes
