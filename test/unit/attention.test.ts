@@ -213,6 +213,45 @@ describe("AttentionTracker (fake kata)", () => {
 			expect(await tracker.isClosed("ab12")).toBe(false);
 		});
 	});
+
+	describe("reconcile", () => {
+		const status = (fields: Record<string, string>): { stdout: string } => ({
+			stdout: JSON.stringify({ kata_api_version: 1, actor: "adam", ...fields }),
+		});
+
+		test("evicts closed, deleted and foreign-owned refs without ending them; keeps owned, unowned and unreadable", async () => {
+			const refs = ["clos", "gone", "othr", "mine", "free", "fail", "junk"];
+			for (const ref of refs) await tracker.start(ref, "sess-1");
+			fake.reply("status clos", status({ issue_status: "closed", owner: "adam" }));
+			fake.reply("status gone", { code: 4, stderr: "issue not found" });
+			fake.reply("status othr", status({ issue_status: "open", owner: "bob" }));
+			fake.reply("status mine", status({ issue_status: "open", owner: "adam" }));
+			fake.reply("status free", status({ issue_status: "open" }));
+			fake.reply("status fail", { code: 7, stdout: JSON.stringify({ issue_status: "closed" }) });
+			fake.reply("status junk", { stdout: "not json" });
+
+			expect((await tracker.reconcile()).sort()).toEqual(["clos", "gone", "othr"]);
+			expect(tracker.refs().sort()).toEqual(["fail", "free", "junk", "mine"]);
+			const calls = fake.callsTo("status");
+			expect(calls.map(c => c.args).sort()).toEqual(refs.sort().map(ref => ["status", ref, "--json"]));
+			for (const call of calls) expect(call.cwd).toBe(root);
+
+			expect(tracker.endAll().sort()).toEqual(["fail", "free", "junk", "mine"]);
+			await waitFor(() => fake.callsTo(END).length === 4, 5000, "four end calls");
+			expect(endRefs().sort()).toEqual(["fail", "free", "junk", "mine"]);
+		});
+
+		test("a re-claim under another session during the check keeps the ref", async () => {
+			await tracker.start("ab12", "sess-1");
+			// the reply delay only has to outlast the re-claim's own fake-kata call
+			fake.reply("status ab12", { ...status({ issue_status: "closed" }), sleepMs: 1000 });
+			const pending = tracker.reconcile();
+			await waitFor(() => fake.callsTo("status").length === 1, 5000, "status call in flight");
+			await tracker.start("ab12", "sess-2");
+			expect(await pending).toEqual([]);
+			expect(tracker.refs()).toEqual(["ab12"]);
+		});
+	});
 });
 
 /** Polls real kata metadata until `predicate` holds; the detached `end` process offers nothing to await. */

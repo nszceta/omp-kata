@@ -70,11 +70,11 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 
 		const idleTick = async (ctx: ExtensionContext, rt: KataRuntime): Promise<void> => {
 			if (!ctx.isIdle()) return;
-			const outcome = await rt.inboxIdlePoll();
-			if (!outcome) return;
-			if (outcome.kind === "wake") {
+			const [outcome, evicted] = await Promise.all([rt.inboxIdlePoll(), rt.reconcileTracked()]);
+			if (!outcome && !evicted) return;
+			if (outcome?.kind === "wake") {
 				pi.sendMessage({ customType: "kata-inbox", content: outcome.payload, display: true }, { triggerTurn: true });
-			} else {
+			} else if (outcome) {
 				ctx.ui.notify(outcome.message, "info");
 			}
 			await refreshStatus(ctx, rt);
@@ -82,7 +82,7 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 
 		const startWatcher = (ctx: ExtensionContext, rt: KataRuntime): void => {
 			stopWatcher();
-			if (rt.agent.kind !== "main" || !rt.settings.inbox) return;
+			if (rt.agent.kind !== "main" || !(rt.settings.inbox || rt.settings.attention)) return;
 			const ms = Math.max(rt.settings.inboxPollSeconds, MIN_IDLE_POLL_SECONDS) * 1000;
 			watcher = { ctx, timer: ctx.setInterval(() => idleTick(ctx, rt), ms) };
 		};
@@ -124,6 +124,7 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 				rt.contractPrompt(event.systemPrompt),
 				rt.inboxForPrompt(),
 				rt.syncIdentity(sessionId(ctx)),
+				rt.reconcileTracked(true),
 			]).then(([c, i]) => [c, i] as const);
 			if (contract.failure !== undefined && !rt.contractWarned) {
 				rt.contractWarned = true;
@@ -157,6 +158,8 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 				rt.observeBashOutput(event.input.command, output);
 				if (await rt.trackBash(event.input.command, sessionId(ctx))) await refreshStatus(ctx, rt);
 			}
+			// subagents close their issues out of this session's sight; a finished task is the likely moment
+			if (await rt.reconcileTracked(event.toolName === "task")) await refreshStatus(ctx, rt);
 			const warning = rt.takeRefWarning(event.toolCallId);
 			const inbox = await rt.inboxForToolResult();
 			if (inbox !== undefined) await refreshStatus(ctx, rt);

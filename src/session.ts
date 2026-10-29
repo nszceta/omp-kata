@@ -22,6 +22,9 @@ export interface RuntimeDeps {
 /** Retry cadence after `kata whoami` failed (daemon down, binary missing). */
 const IDENTITY_RETRY_MS = 10_000;
 
+/** Minimum spacing of unforced tracked-ref reconciliations (each runs one `kata status` per ref). */
+const RECONCILE_INTERVAL_MS = 15_000;
+
 /**
  * All kata behavior for one omp session inside one workspace. Handlers in index.ts only translate
  * omp events into calls on this class, which holds no omp types and is exercised directly in tests.
@@ -43,6 +46,8 @@ export class KataRuntime {
 	readonly refGuard: RefGuard;
 	/** Ref-guard warnings (warn mode) waiting for their tool result, by tool call id. */
 	private readonly refWarnings = new Map<string, string>();
+	private reconcileAt = 0;
+	private reconcilePending: Promise<boolean> | undefined;
 
 	constructor(
 		readonly root: string,
@@ -179,6 +184,24 @@ export class KataRuntime {
 	async trackBash(command: unknown, sessionId: string): Promise<boolean> {
 		if (!this.settings.attention || typeof command !== "string") return false;
 		return this.attention.applyCommand(command, sessionId, this.kataNames);
+	}
+
+	/**
+	 * Drops tracked refs that are no longer worked on (see AttentionTracker.reconcile). Unforced calls
+	 * run at most every RECONCILE_INTERVAL_MS; concurrent calls share one run. Returns whether tracking changed.
+	 */
+	reconcileTracked(force = false): Promise<boolean> {
+		if (this.reconcilePending) return this.reconcilePending;
+		const now = this.deps.now();
+		if (this.attention.refs().length === 0 || (!force && now < this.reconcileAt)) return Promise.resolve(false);
+		this.reconcileAt = now + RECONCILE_INTERVAL_MS;
+		this.reconcilePending = this.attention
+			.reconcile()
+			.then(evicted => evicted.length > 0)
+			.finally(() => {
+				this.reconcilePending = undefined;
+			});
+		return this.reconcilePending;
 	}
 
 	/**

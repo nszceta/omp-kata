@@ -83,6 +83,7 @@ Only changes are delivered. When a non-empty inbox becomes empty the agent gets 
 - Main session started with `KATA_REF` set: attention starts for that issue (skipped if the issue is already closed).
 - A successful bash `kata claim <ref…>` (also in chains, with global flags, via a path, behind env prefixes) starts attention and tracks the ref, in main sessions and subagents.
 - A successful `kata close <ref>` stops tracking (kata's `end` would downgrade a healthy `ok` to `needs-human`, which is wrong for closed issues).
+- Tracked refs are reconciled against `kata status <ref> --json`: a ref whose issue is closed (for example by a subagent, which this session never sees), deleted, or now owned by another actor stops being tracked without an `end`. Unowned issues stay tracked (`KATA_REF` attention starts without a claim), and so does any ref whose state cannot be read. Reconciliation runs before every prompt, after every `task` tool result, for `/kata status`, and at most every 15 s after other tool results and while the main session is idle (the idle check uses the `inboxPollSeconds` cadence, minimum 5 s, and runs when `inbox` or `attention` is enabled).
 - Session shutdown ends every tracked ref; `/new`, `/resume` and fork end the old session's refs and restart `KATA_REF` for the new session. Ending uses detached processes because the shutdown handler budget is 2 s.
 - kata derives the attention owner from the host pid and silently does nothing if that pid is gone, which would make a detached `end` after omp exits a no-op. Every attention call therefore also sets `KATA_SESSION_ID=omp-<omp session id>` (kata's launcher-id override) so start and end address the same owner regardless of pid liveness.
 - A hard crash or `SIGKILL` cannot run the shutdown hook; kata has no watcher, so such issues keep `ok` until someone notices.
@@ -91,7 +92,7 @@ Detection is based on the bash command text and exit status; a chain `kata claim
 
 ### Status line and `/kata`
 
-With a UI, the footer shows `kata <inbox user>`, plus ` · <tracked refs>` and ` · inbox N`.
+With a UI, the footer shows `kata <inbox user>`, plus ` · <tracked refs>` and ` · inbox N`. Tracked refs are only the issues this session is still working on (see the reconciliation rule under Attention).
 
 - `/kata` or `/kata status`: workspace root, actor, teammate, inbox user, tracked refs, contract status, inbox count, effective settings.
 - `/kata inbox`: fetch and show the inbox.

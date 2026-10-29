@@ -32,6 +32,7 @@ export async function statusReport(host: CommandHost, ctx: ExtensionCommandConte
 		lines.push(`actor: ${identity?.actor ?? "unknown (kata whoami failed)"}`);
 		lines.push(`teammate: ${identity?.teammate || "(none)"}`);
 		lines.push(`inbox user: ${identity?.inboxUser ?? "unknown"}`);
+		await rt.reconcileTracked(true);
 		lines.push(`tracked refs: ${rt.attention.refs().join(", ") || "(none)"}`);
 		lines.push(`contract: ${describeContract(rt)}`);
 		lines.push(`inbox: ${rt.inbox ? `${rt.inbox.count} request(s)` : "not checked yet"}`);

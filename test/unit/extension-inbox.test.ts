@@ -138,14 +138,19 @@ describe("idle inbox watcher", () => {
 		expect(ctx.intervals.map(i => i.ms)).toEqual([ms]);
 	});
 
-	test("no watcher for subagents or when the inbox is disabled", async () => {
+	test("no watcher for subagents or when both inbox and attention are disabled", async () => {
 		const sub = rig.session({ agent: { kind: "sub", id: "Sailfish" } });
 		await (await rig.load()).emit("session_start", {}, sub);
 		expect(sub.intervals).toEqual([]);
 
 		const disabled = rig.session();
-		await (await rig.load({ OMP_KATA_INBOX: "0" })).emit("session_start", {}, disabled);
+		await (await rig.load({ OMP_KATA_INBOX: "0", OMP_KATA_ATTENTION: "0" })).emit("session_start", {}, disabled);
 		expect(disabled.intervals).toEqual([]);
+
+		// attention alone keeps the watcher: idle ticks reconcile tracked refs
+		const attentionOnly = rig.session();
+		await (await rig.load({ OMP_KATA_INBOX: "0" })).emit("session_start", {}, attentionOnly);
+		expect(attentionOnly.intervals).toHaveLength(1);
 	});
 
 	test("a tick while the agent is busy never calls kata", async () => {

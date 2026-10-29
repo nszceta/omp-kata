@@ -6,6 +6,8 @@ import { parseRefEvents } from "./refs";
 export const HARNESS = "pi";
 
 const START_TIMEOUT_MS = 5_000;
+/** kata's exit code for a missing (e.g. deleted) issue. */
+const NOT_FOUND_EXIT = 4;
 
 /**
  * Tracks issues this session claimed and drives `kata agent-hook attention-native`.
@@ -76,6 +78,37 @@ export class AttentionTracker {
 	/** Closed issues keep their attention state; ending would downgrade ok to needs-human. */
 	untrack(ref: string): void {
 		this.tracked.delete(ref);
+	}
+
+	/**
+	 * Evicts refs nobody in this session works on any more: closed (often by a subagent or another
+	 * session, which this tracker never sees), deleted, or now owned by another actor.
+	 * Evicted refs are only untracked, never ended: ending would write needs-human onto an issue this
+	 * session no longer owns. Refs whose state cannot be read are kept. Returns the evicted refs.
+	 */
+	async reconcile(): Promise<string[]> {
+		const snapshot = [...this.tracked];
+		const verdicts = await Promise.all(snapshot.map(([ref]) => this.isInactive(ref)));
+		const evicted: string[] = [];
+		snapshot.forEach(([ref, sessionId], i) => {
+			// a re-claim under another session while the checks ran is newer than the verdict
+			if (!verdicts[i] || this.tracked.get(ref) !== sessionId) return;
+			this.tracked.delete(ref);
+			evicted.push(ref);
+		});
+		return evicted;
+	}
+
+	/** `kata status`: closed, not found, or owned by another actor. Unknown state counts as active. */
+	private async isInactive(ref: string): Promise<boolean> {
+		const result = await this.cli.run(["status", ref, "--json"], { cwd: this.root, timeoutMs: START_TIMEOUT_MS });
+		if (result.code === NOT_FOUND_EXIT) return true;
+		if (result.code !== 0) return false;
+		const status = parseJsonObject(result.stdout);
+		if (status?.issue_status === "closed") return true;
+		// Unowned issues (no owner field) stay: KATA_REF attention starts without a claim.
+		const { owner, actor } = status ?? {};
+		return typeof owner === "string" && owner !== "" && typeof actor === "string" && actor !== "" && owner !== actor;
 	}
 
 	/** Applies the claim/close events of a successful bash command. Returns whether tracking changed. */

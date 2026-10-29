@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { bashResult, waitFor } from "./helpers";
-import { attentionArgs, HOST_PID, INBOX_TEXT, prompt, Rig, SESSION } from "./extension-harness";
+import { attentionArgs, HOST_PID, INBOX_TEXT, prompt, Rig, SESSION, T0 } from "./extension-harness";
 
 const NO_CONTRACT = { OMP_KATA_CONTRACT: "0" };
 const START = "agent-hook attention-native pi start";
@@ -196,6 +196,51 @@ describe("status line", () => {
 
 		await host.emit("session_shutdown", {}, ctx);
 		expect(ctx.lastStatus).toBeUndefined();
+	});
+
+	test("refs closed out of sight leave the footer on a task result, at the next prompt, or after the 15 s throttle", async () => {
+		const host = await rig.load(NO_CONTRACT);
+		const ctx = rig.session({ hasUI: true });
+		await host.emit("session_start", {}, ctx);
+		await host.emitOne("tool_result", bashResult("kata claim aaaa bbbb cccc dddd"), ctx);
+		expect(ctx.lastStatus).toBe("kata fakeuser · aaaa,bbbb,cccc,dddd");
+		const closed = { stdout: JSON.stringify({ issue_status: "closed", owner: "fakeuser", actor: "fakeuser" }) };
+
+		// a subagent closed aaaa: the task result reconciles right away
+		rig.fake.reply("status aaaa", closed);
+		await host.emitOne("tool_result", { toolName: "task", toolCallId: "t2", input: {}, content: [], isError: false }, ctx);
+		expect(ctx.lastStatus).toBe("kata fakeuser · bbbb,cccc,dddd");
+
+		// someone else took bbbb: the next prompt reconciles regardless of the throttle
+		rig.fake.reply("status bbbb", { stdout: JSON.stringify({ issue_status: "open", owner: "other", actor: "fakeuser" }) });
+		await prompt(host, ctx);
+		expect(ctx.lastStatus).toBe("kata fakeuser · cccc,dddd");
+
+		// other tool results reconcile at most every 15 s
+		rig.fake.reply("status cccc", closed);
+		await host.emitOne("tool_result", bashResult("ls"), ctx);
+		expect(ctx.lastStatus).toBe("kata fakeuser · cccc,dddd");
+		rig.time = T0 + 15_000;
+		await host.emitOne("tool_result", bashResult("ls"), ctx);
+		expect(ctx.lastStatus).toBe("kata fakeuser · dddd");
+
+		// evicted refs are not ended at shutdown; the still-active one is
+		await host.emit("session_shutdown", {}, ctx);
+		await settle();
+		expect(hookCalls(END).map(args => args[args.indexOf("--ref") + 1])).toEqual(["dddd"]);
+	});
+
+	test("an idle tick evicts a ref closed while the session waits", async () => {
+		const host = await rig.load({ ...NO_CONTRACT, OMP_KATA_INBOX: "0" });
+		const ctx = rig.session({ hasUI: true });
+		await host.emit("session_start", {}, ctx);
+		await host.emitOne("tool_result", bashResult("kata claim aaaa bbbb"), ctx);
+		expect(ctx.lastStatus).toBe("kata fakeuser · aaaa,bbbb");
+
+		rig.fake.reply("status bbbb", { stdout: JSON.stringify({ issue_status: "closed", actor: "fakeuser" }) });
+		rig.time = T0 + 15_000;
+		await ctx.tick();
+		expect(ctx.lastStatus).toBe("kata fakeuser · aaaa");
 	});
 
 	test("without a UI the status is never touched", async () => {
