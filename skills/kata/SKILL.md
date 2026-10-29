@@ -48,8 +48,11 @@ re-read or restate the contract.
    When unsure between `sonic` and `task`, use `task`.
    The ref is for kata commands only: tell the child not to cite it in code, docs, file names, or commit
    messages, and to record commit SHAs and doc paths on the issue instead.
-   If siblings run in parallel and may touch the same file, tell each one which files overlap and the
-   sibling agent ids, and have them coordinate over IRC (`write agent://<id>`) before editing a shared file.
+   Parallel siblings must coordinate file edits together over IRC (`write agent://<id>`), whether or not you
+   expect their files to overlap. Give each one the ids of all the others. Before editing a file, a sibling
+   tells the others what it will change there, and siblings in the same file agree on how to combine their
+   changes. A sibling builds on the others' edits and never reverts, overwrites, or discards them; if one looks
+   wrong, it raises it with that sibling instead of undoing it.
 3. Wait without blocking your own work: run
    `kata wait <child-refs> --until attention --any --timeout 10m`
    as an async bash job. It returns when any child sets a non-`ok` attention (`needs-human`, `stuck`) or closes

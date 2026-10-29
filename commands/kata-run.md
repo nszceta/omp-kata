@@ -28,7 +28,7 @@ Independent ready issues: fan out to parallel subagents, one issue each. The `ag
 
 When unsure between `sonic` and `task`, use `task`.
 If a `sonic` subagent ends without closing its issue because the work needed design or investigation (not because it needs human input), re-spawn it as `task` with the issue's comments and `work.attention_msg` as context before leaving it `needs-human`. A subagent that leaves its issue `needs-human` must apply step 5. If its message is not a concrete question, read the issue and write the question yourself.
-Siblings that touch the same file must coordinate over IRC (`write agent://<id>`) before editing it; name the shared files and each sibling's id in their assignments so they know whom to message.
+Parallel subagents must coordinate file edits together over IRC (`write agent://<id>`), whether or not you expect their files to overlap. Give every sibling the ids of all the others. Before editing a file, a subagent tells its siblings what it will change there, and siblings working in the same file agree on how to combine their changes. A subagent must build on a sibling's edits, never revert, overwrite, or discard them; if a sibling's change looks wrong, raise it with that sibling instead of undoing it.
 
 Issue refs belong in kata commands only. Never cite them in deliverables (code, tests, docs, file or directory names, commit messages), and do not ask subagents to; describe the change in words, and record commit SHAs and doc paths on the issue instead.
 
