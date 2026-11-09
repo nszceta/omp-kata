@@ -197,6 +197,7 @@ describe("close parsing", () => {
 	test("value flags before the ref do not leak their values as refs", () => {
 		expect(parseCloseRefs("kata close -m 'msg here' --done abcd")).toEqual(["abcd"]);
 		expect(parseCloseRefs("kata close --commit abc1234 --done abcd")).toEqual(["abcd"]);
+		expect(parseCloseRefs("kata close --docbank abcd1234 --done abcd")).toEqual(["abcd"]);
 		expect(parseCloseRefs("kata close --done --message 'long enough message text' abcd")).toEqual(["abcd"]);
 	});
 

@@ -6,6 +6,8 @@ const SPIN = { main: [{ bash: "echo one" }, { bash: "echo two" }, { text: "done"
 describe("contract injection", () => {
 	test("linked plugin: own system block, exactly once across turns, skill listed", async () => {
 		await withEnv({ link: true }, async env => {
+			const quickstart = await env.kata(["quickstart", "--format", "contract"]);
+			expect(quickstart.code).toBe(0);
 			const res = await env.run(SPIN, "go");
 			expect(res.code).toBe(0);
 			const main = res.requests.filter(r => r.agent === "main");
@@ -15,7 +17,7 @@ describe("contract injection", () => {
 				expect(blocks.length).toBe(1);
 				expect(blocks[0]!.startsWith("<kata_contract>")).toBe(true);
 				expect(blocks[0]!.trimEnd().endsWith("</kata_contract>")).toBe(true);
-				expect(blocks[0]).toContain("Kata is the system of record for intent");
+				expect(blocks[0]).toStartWith(`<kata_contract>\n${quickstart.stdout}\n`);
 				// separate block, not glued onto the base prompt
 				expect(systemBlocks(req).length).toBeGreaterThan(1);
 				expect(count(fullText(req), "<kata_contract>")).toBe(1);

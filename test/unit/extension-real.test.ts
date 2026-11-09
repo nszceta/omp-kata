@@ -94,7 +94,6 @@ describe("real kata through the extension", () => {
 		expect(result?.systemPrompt).toHaveLength(3);
 		const block = result?.systemPrompt?.[2] ?? "";
 		expect(block).toStartWith(`<kata_contract>\n${hook.hookSpecificOutput.additionalContext}\nomp-kata: omp sets kata identity automatically`);
-		expect(block).toStartWith("<kata_contract>\nKata is the system of record for intent.");
 		expect(block).toEndWith(`\nidentity: actor=unit-actor teammate=(none) inbox=unit-actor\n${MAIN_TAIL}\n</kata_contract>`);
 	}, 30_000);
 

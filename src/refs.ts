@@ -118,6 +118,7 @@ const VALUE_FLAGS: Record<string, true> = {
 	"--test": true,
 	"--reviewed": true,
 	"--evidence": true,
+	"--docbank": true,
 	"--duplicate-of": true,
 	"--superseded-by": true,
 	"--idempotency-key": true,

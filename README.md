@@ -24,7 +24,7 @@ cd ~/src/omp-kata && bun install   # types only; runtime has no dependencies
 omp plugin link ~/src/omp-kata
 ```
 
-Requirements: omp ≥ 18.12 (Bun runtime) and `kata` ≥ 0.20 on `PATH` (or set `executable`).
+Requirements: omp ≥ 18.12 (Bun runtime) and `kata` ≥ 0.23 on `PATH` (or set `executable`).
 
 `omp --plugin-dir <path>` is **not** enough: it treats the directory as a Claude-style plugin root (skills, commands) and does not load `omp.extensions`. To try the extension without installing use `omp -e <path-to-this-repo>`.
 

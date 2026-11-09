@@ -301,6 +301,7 @@ describe("getContract against real kata", () => {
 			const saved = { KATA_HOME: process.env.KATA_HOME, KATA_AUTHOR: process.env.KATA_AUTHOR };
 			Object.assign(process.env, rk.env());
 			try {
+				await rk.init();
 				const cli = new KataCli(REAL_KATA);
 				const quickstart = await rk.kata(["quickstart", "--format", "contract"]);
 				expect(quickstart.code).toBe(0);
@@ -308,7 +309,6 @@ describe("getContract against real kata", () => {
 				const builtIn = await getContract(cli, settings(), rk.root);
 				expect(builtIn.ok).toBe(true);
 				if (builtIn.ok) {
-					expect(builtIn.text).toStartWith("Kata is the system of record for intent");
 					expect(builtIn.text).toBe(quickstart.stdout);
 					expect(withContract([], builtIn)).toEqual([`<kata_contract>\n${quickstart.stdout}\n</kata_contract>`]);
 				}
