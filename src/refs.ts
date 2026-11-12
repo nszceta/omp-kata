@@ -61,7 +61,7 @@ function isArithmetic(command: string, open: number): boolean {
 
 /**
  * End index of a redirection operator starting at `i` (fd digits only at a word start), or `i` when there is none.
- * Heredocs, here-strings and process substitutions are not handled here.
+ * Here-documents, here-strings (`<<<`, handled in {@link scanCommand}) and process substitutions are not handled here.
  */
 function redirectionEnd(command: string, i: number, inWord: boolean): number {
 	let j = i;
@@ -87,6 +87,8 @@ export interface ScannedCommand {
 	segments: string[][];
 	/** Here-document bodies in source order, delimiter line excluded; `<<-` bodies keep their leading tabs. */
 	heredocs: string[];
+	/** Here-string words (`<<<word`) in source order, quotes removed. */
+	hereStrings: string[];
 }
 
 /** Splits a command into simple-command segments of unquoted words. Shell expansions are left as raw text. */
@@ -98,17 +100,22 @@ export function tokenizeCommand(command: string): string[][] {
 export function scanCommand(command: string): ScannedCommand {
 	const segments: string[][] = [];
 	const heredocs: string[] = [];
+	const hereStrings: string[] = [];
 	const pending: { delimiter: string; strip: boolean }[] = [];
 	let words: string[] = [];
 	let word = "";
 	let inWord = false;
 	let dropNext = false;
+	let hereNext = false;
 	let i = 0;
 
 	const endWord = () => {
 		if (inWord) {
 			// A redirection target is not an argument.
-			if (dropNext) dropNext = false;
+			if (hereNext) {
+				hereNext = false;
+				hereStrings.push(word);
+			} else if (dropNext) dropNext = false;
 			else words.push(word);
 		}
 		word = "";
@@ -117,6 +124,7 @@ export function scanCommand(command: string): ScannedCommand {
 	const endSegment = () => {
 		endWord();
 		dropNext = false;
+		hereNext = false;
 		if (words.length > 0) segments.push(words);
 		words = [];
 	};
@@ -194,9 +202,13 @@ export function scanCommand(command: string): ScannedCommand {
 			}
 			i += 2;
 		} else if (ch === "<" && command[i + 1] === "<" && command[i + 2] === "<") {
-			// Here-string: its word is data, not a delimiter.
-			word += "<<<";
-			inWord = true;
+			// Here-string: optional fd digits and the operator are dropped; its word is stdin data, not an argument.
+			if (inWord && /^\d+$/.test(word)) {
+				word = "";
+				inWord = false;
+			}
+			endWord();
+			hereNext = true;
 			i += 3;
 		} else if (ch === "<" && command[i + 1] === "<") {
 			// Here-document: the delimiter is consumed now, the body at the next newline.
@@ -246,7 +258,7 @@ export function scanCommand(command: string): ScannedCommand {
 		}
 	}
 	endSegment();
-	return { segments, heredocs };
+	return { segments, heredocs, hereStrings };
 }
 
 /** Global flags (and claim/close flags) that consume the following word as their value. */
@@ -586,8 +598,8 @@ function substitutionHeredocs(segments: string[][], out: string[]): void {
 					i = close === -1 ? word.length : close;
 				} else continue;
 				const scanned = scanCommand(inner);
-				out.push(...scanned.heredocs);
-				substitutionHeredocs(scanned.segments, out);
+				out.push(...scanned.heredocs, ...scanned.hereStrings);
+				substitutionHeredocs([...scanned.segments, scanned.hereStrings], out);
 			}
 		}
 	}
@@ -595,13 +607,15 @@ function substitutionHeredocs(segments: string[][], out: string[]): void {
 
 /**
  * Commit message text a bash command hands to `git commit`: `-m`/`--message` and `--trailer` values,
- * plus the command's here-document bodies (also those inside command substitutions) when the message is read from stdin (`-F-`, `--file=-`).
+ * plus the command's here-document bodies and here-string words (also those inside command substitutions) when the message is read from stdin (`-F-`, `--file=-`).
  */
 export function gitCommitMessages(command: string): string[] {
 	const state = { messages: [] as string[], stdin: false };
-	const { segments, heredocs } = scanCommand(command);
+	const { segments, heredocs, hereStrings } = scanCommand(command);
 	for (const words of segments) commitSegment(words, state);
 	if (!state.stdin) return state.messages;
-	substitutionHeredocs(segments, heredocs);
-	return [...state.messages, ...heredocs];
+	substitutionHeredocs([...segments, hereStrings], heredocs);
+	// A here-string that is a lone substitution feeds that command's output, which is scanned above, not its source text.
+	const literal = hereStrings.filter(text => !(/^\$\(.*\)$/s.test(text) || /^`[^`]*`$/.test(text)));
+	return [...state.messages, ...heredocs, ...literal];
 }

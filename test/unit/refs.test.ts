@@ -81,7 +81,8 @@ describe("tokenizeCommand", () => {
 	});
 
 	test("here-strings and quoted << are not here-documents", () => {
-		expect(tokenizeCommand("cat <<< word\necho a")).toEqual([["cat", "<<<", "word"], ["echo", "a"]]);
+		expect(tokenizeCommand("cat <<< word\necho a")).toEqual([["cat"], ["echo", "a"]]);
+		expect(tokenizeCommand("cat 3<<<'x y' z\necho a")).toEqual([["cat", "z"], ["echo", "a"]]);
 		expect(tokenizeCommand("echo 'x <<EOF'\nkata claim abcd\nEOF")).toEqual([
 			["echo", "x <<EOF"],
 			["kata", "claim", "abcd"],
@@ -301,6 +302,11 @@ describe("event order", () => {
 		]);
 	});
 
+	test("here-string words are not kata arguments", () => {
+		expect(parseRefEvents("kata claim abcd <<< efgh")).toEqual([{ action: "claim", ref: "abcd" }]);
+		expect(parseRefEvents("kata claim abcd<<<efgh")).toEqual([{ action: "claim", ref: "abcd" }]);
+	});
+
 	test("reversed commands give reversed events", () => {
 		expect(parseRefEvents("kata close a1b2 --done; kata claim a1b2")).toEqual([
 			{ action: "close", ref: "a1b2" },
@@ -388,7 +394,12 @@ describe("gitCommitMessages", () => {
 
 	test("a quoted << is not a here-document, and non-stdin heredocs are ignored", () => {
 		expect(gitCommitMessages("echo 'x <<EOF'\ngit commit -F -\nfoo\nEOF")).toEqual([]);
-		expect(gitCommitMessages("git commit -F - <<< msg")).toEqual([]);
+		expect(gitCommitMessages("git commit -F - <<< msg")).toEqual(["msg"]);
+		expect(gitCommitMessages('git commit -F - <<< "fix kata#abcd"')).toEqual(["fix kata#abcd"]);
+		expect(gitCommitMessages("git commit -F- <<<'fix kata#abcd'")).toEqual(["fix kata#abcd"]);
+		expect(gitCommitMessages("git commit --file=- <<< fix")).toEqual(["fix"]);
+		expect(gitCommitMessages("git commit -m x <<< kata#abcd")).toEqual(["x"]);
+		expect(gitCommitMessages("cat <<< kata#abcd")).toEqual([]);
 	});
 
 	test("every here-document body counts when the message comes from stdin", () => {
