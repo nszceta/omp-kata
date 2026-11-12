@@ -126,7 +126,8 @@ function canExecute(path: string): boolean {
 function isPrivateOwnDir(path: string): boolean {
 	if (!isAbsolute(path)) return false;
 	try {
-		const stat = lstatSync(path);
+		// Without trailing slashes: `lstat("link/")` follows the link.
+		const stat = lstatSync(path.replace(/\/+$/, "") || "/");
 		return stat.isDirectory() && stat.uid === process.getuid?.() && (stat.mode & 0o077) === 0;
 	} catch {
 		return false;

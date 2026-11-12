@@ -138,7 +138,7 @@ describe("ShimHost root selection", () => {
 		const original = process.env.TMPDIR;
 		process.env.TMPDIR = tmp;
 		try {
-			for (const runtime of [link, join(tmp, "missing")]) {
+			for (const runtime of [link, `${link}/`, join(tmp, "missing")]) {
 				const host = newHost({ PATH: "/usr/bin", XDG_RUNTIME_DIR: runtime }, {});
 				expect(host.install("/real/kata").startsWith(`${tmp}/omp-kata-`)).toBe(true);
 				host.dispose();
