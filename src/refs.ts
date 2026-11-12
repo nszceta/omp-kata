@@ -147,7 +147,7 @@ function basename(token: string): string {
 const RESERVED_PREFIX = new Set(["if", "then", "elif", "else", "do", "while", "until", "!", "{"]);
 /** Options of prefix commands that consume the next word; short flags match exactly, long flags only without `=`. */
 const PREFIX_VALUE_OPTIONS: Record<string, ReadonlySet<string>> = {
-	env: new Set(["-u", "--unset", "-C", "--chdir", "-S", "--split-string"]),
+	env: new Set(["-u", "--unset", "-C", "--chdir"]),
 	exec: new Set(["-a"]),
 };
 
@@ -171,7 +171,8 @@ function findCommandWord(words: string[], names: ReadonlySet<string>): number {
 			continue;
 		}
 		if (word.startsWith("-") && word.length > 1) {
-			if (prefix === "command" && /^-[vV]/.test(word)) return -1;
+			if (prefix === "env" && /^(?:-[0iv]*S|--split-string(?:=|$))/.test(word)) return -1;
+			if (prefix === "command" && /^-[pvV]*[vV]/.test(word)) return -1;
 			if (PREFIX_VALUE_OPTIONS[prefix]?.has(word)) i++;
 			continue;
 		}
