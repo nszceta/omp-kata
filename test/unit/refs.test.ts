@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { RefGuard } from "../../src/guard";
 import {
 	gitCommitMessages,
 	isIssueRef,
@@ -482,5 +483,27 @@ describe("attention and ref guard agree on claim refs", () => {
 	test.each(cases)("%s", (command, expected) => {
 		expect(parseRefEvents(command).filter(e => e.action === "claim").map(e => e.ref)).toEqual(expected);
 		expect(kataMentions(command).refs).toEqual(expected);
+	});
+});
+
+describe("flag values after a hidden or leading ref are not refs", () => {
+	const cases: [string, string[]][] = [
+		['kata wait "$A" "$B" --until closed --timeout 2h', []],
+		["kata wait $ID --until reply --timeout 30m", []],
+		["kata wait $(cat ids) --until stuck", []],
+		["kata wait ${IDS[@]} --until attention --any", []],
+		["kata wait $ID --timeout 1h30m", []],
+		["kata claim $ID --comment starting work", []],
+		["kata wait --until closed abcd", ["abcd"]],
+		["kata wait abcd efgh --until closed --poll-interval 5s", ["abcd", "efgh"]],
+	];
+	test.each(cases)("%s", (command, expected) => {
+		expect(kataMentions(command).refs).toEqual(expected);
+	});
+
+	test("a later write containing a wait condition is not blocked", () => {
+		const guard = new RefGuard("/ws", undefined, ["kata"]);
+		guard.observeCommand("kata wait $ID --until closed --timeout 2h");
+		expect(guard.find("the issue is closed now")).toBeUndefined();
 	});
 });

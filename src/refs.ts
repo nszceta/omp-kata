@@ -238,6 +238,9 @@ const VALUE_FLAGS: Record<string, true> = {
 	"--superseded-by": true,
 	"--idempotency-key": true,
 	"--if-match": true,
+	"--until": true,
+	"--timeout": true,
+	"--poll-interval": true,
 };
 
 function takesValue(word: string): boolean {
@@ -353,6 +356,8 @@ function walkInvocation(words: string[], from: number, isRef: (word: string) => 
 	let rule: { skip: number; many: boolean } | undefined;
 	let skipped = 0;
 	let taken = 0;
+	// A skipped leading non-ref (`$ID`) may stand for the ref, so the next flag ends the scan.
+	let stoodIn = false;
 	for (let i = from; i < words.length; i++) {
 		const word = words[i] as string;
 		if (word.startsWith("-")) {
@@ -365,7 +370,7 @@ function walkInvocation(words: string[], from: number, isRef: (word: string) => 
 				for (const ref of (value ?? "").split(",")) if (isRef(ref)) out.refs.push({ ref, positional: false });
 			} else if (flag === "--project" && value) out.projects.push(value);
 			if (eq === -1 && (refFlag || takesValue(word))) i++;
-			if (taken > 0) rule = undefined;
+			if (taken > 0 || stoodIn) rule = undefined;
 			continue;
 		}
 		if (out.sub === undefined) {
@@ -381,6 +386,7 @@ function walkInvocation(words: string[], from: number, isRef: (word: string) => 
 		if (!isRef(word)) {
 			// Multi-ref commands skip leading non-refs (an unexpanded `$ID`); everything else gives up.
 			if (taken > 0 || !rule.many) rule = undefined;
+			else stoodIn = true;
 			continue;
 		}
 		out.refs.push({ ref: word, positional: true });
