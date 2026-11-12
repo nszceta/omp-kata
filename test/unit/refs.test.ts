@@ -63,7 +63,7 @@ describe("tokenizeCommand", () => {
 
 	test("here-document bodies are opaque and not segments; following commands still tokenize", () => {
 		expect(tokenizeCommand("cat > x.sh <<EOF\nkata claim wxyz\nEOF\nkata close abcd")).toEqual([
-			["cat", ">", "x.sh"],
+			["cat"],
 			["kata", "close", "abcd"],
 		]);
 		expect(tokenizeCommand("cat<<EOF;echo a\nbody; echo b\nEOF")).toEqual([["cat"], ["echo", "a"]]);
@@ -89,7 +89,7 @@ describe("tokenizeCommand", () => {
 	});
 
 	test("CRLF line endings still end the here-document", () => {
-		expect(tokenizeCommand("cat <<EOF > f\r\nx\r\nEOF\r\nkata claim abcd")).toEqual([["cat", ">", "f"], ["kata", "claim", "abcd"]]);
+		expect(tokenizeCommand("cat <<EOF > f\r\nx\r\nEOF\r\nkata claim abcd")).toEqual([["cat"], ["kata", "claim", "abcd"]]);
 	});
 
 	test("<< inside bare arithmetic is a shift, not a here-document", () => {
@@ -463,4 +463,22 @@ describe("shell keywords and prefix options before kata", () => {
 	test("git commit after if", () => {
 		expect(gitCommitMessages('if git commit -m "hello"; then echo; fi')).toEqual(["hello"]);
 	});
+});
+
+describe("redirections", () => {
+	const cases: [string, string[][]][] = [
+		["kata claim abcd >> notes", [["kata", "claim", "abcd"]]],
+		["kata claim abcd 2>&1 | tee output", [["kata", "claim", "abcd"], ["tee", "output"]]],
+		["kata close abcd --done >/dev/null", [["kata", "close", "abcd", "--done"]]],
+		["kata claim abcd &> log", [["kata", "claim", "abcd"]]],
+		["kata claim abcd < input", [["kata", "claim", "abcd"]]],
+		["kata claim >log abcd", [["kata", "claim", "abcd"]]],
+		["echo x >&2; kata close abcd --done", [["echo", "x"], ["kata", "close", "abcd", "--done"]]],
+		["git commit -m msg 2>/dev/null", [["git", "commit", "-m", "msg"]]],
+		["echo abc2>x", [["echo", "abc2"]]],
+		["cat <(ls) >| out", [["cat", "<"], ["ls"]]],
+	];
+	for (const [cmd, expected] of cases) {
+		test(cmd, () => expect(tokenizeCommand(cmd)).toEqual(expected));
+	}
 });
