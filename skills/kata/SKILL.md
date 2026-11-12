@@ -41,7 +41,7 @@ issues to subagents.
   only for merges and post-merge fixes.
 - **Task branches** `kata-task/<run>/<task-slug>`: one per issue and per subagent, created from the current tip
   of `kata/<run>`, each in its own worktree at `<repo-root>/.kata-worktrees/<run>/<task-slug>` (add
-  `/.kata-worktrees/` to `.git/info/exclude`). The issue is done, verified, and committed there and nowhere else.
+  `/.kata-worktrees/` to the repository's info/exclude, `git rev-parse --git-path info/exclude`). The issue is done, verified, and committed there and nowhere else.
   Issues you work yourself get a task branch too.
 - **Local only**: create with `--no-track`; never push, set an upstream, or open a PR. Never put a kata ref in a
   branch name. Merge with `--no-ff`; never rebase, squash, or amend: issue evidence SHAs must stay reachable.
