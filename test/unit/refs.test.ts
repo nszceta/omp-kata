@@ -13,6 +13,15 @@ import {
 const ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
 describe("tokenizeCommand", () => {
+	test("follows ANSI-C, locale and double-quote backslash rules", () => {
+		expect(tokenizeCommand("echo $'ab\\'cd'")).toEqual([["echo", "ab'cd"]]);
+		expect(tokenizeCommand("echo $'a\\\\b\\tc'")).toEqual([["echo", "a\\b\tc"]]);
+		expect(tokenizeCommand('echo $"x"')).toEqual([["echo", "x"]]);
+		expect(tokenizeCommand('echo "a\\b"')).toEqual([["echo", "a\\b"]]);
+		expect(tokenizeCommand('echo "a\\"b"')).toEqual([["echo", 'a"b']]);
+		expect(tokenizeCommand("kata claim $'ab\\'cd' efgh")).toEqual([["kata", "claim", "ab'cd", "efgh"]]);
+	});
+
 	test("splits on && || ; | and newline into simple-command segments", () => {
 		expect(tokenizeCommand("echo a && echo b; echo c | cat\necho d || echo e")).toEqual([
 			["echo", "a"],

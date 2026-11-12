@@ -24,6 +24,9 @@ function balancedEnd(command: string, open: number): number {
 	return command.length;
 }
 
+/** Characters whose ANSI-C escape yields the character itself. */
+const ANSI_C_PLAIN = `'"\\?`;
+
 /** Splits a command into simple-command segments of unquoted words. Shell expansions are left as raw text. */
 export function tokenizeCommand(command: string): string[][] {
 	const segments: string[][] = [];
@@ -55,9 +58,37 @@ export function tokenizeCommand(command: string): string[][] {
 			i++;
 			inWord = true;
 			while (i < command.length && command[i] !== '"') {
-				if (command[i] === "\\" && i + 1 < command.length) i++;
+				if (command[i] === "\\" && i + 1 < command.length) {
+					const next = command[i + 1] as string;
+					if (next === "\n") {
+						i += 2;
+						continue;
+					}
+					// POSIX: backslash is removed only before $ ` " \ and newline.
+					if (next === "$" || next === "`" || next === '"' || next === "\\") i++;
+				}
 				word += command[i];
 				i++;
+			}
+			i++;
+		} else if (ch === "$" && command[i + 1] === '"') {
+			// Locale quoting: same as a double-quoted string without the `$`.
+			i++;
+		} else if (ch === "$" && command[i + 1] === "'") {
+			i += 2;
+			inWord = true;
+			while (i < command.length && command[i] !== "'") {
+				if (command[i] === "\\" && i + 1 < command.length) {
+					const esc = command[i + 1] as string;
+					i += 2;
+					if (esc === "n") word += "\n";
+					else if (esc === "t") word += "\t";
+					else if (esc === "r") word += "\r";
+					else word += ANSI_C_PLAIN.includes(esc) ? esc : `\\${esc}`;
+				} else {
+					word += command[i];
+					i++;
+				}
 			}
 			i++;
 		} else if (ch === "$" && command[i + 1] === "(") {
