@@ -1,6 +1,6 @@
 import { accessSync, chmodSync, constants, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Env } from "./config";
 import { type Identity, shellQuote } from "./identity";
@@ -96,7 +96,7 @@ export function stripShellPrefix(value: string | undefined): string {
 export function detachInheritedShim(env: Env): void {
 	// Shim dirs are `<root>/omp-kata-<pid>-XXXXXX/bin`.
 	const isShimDir = (dir: string) => basename(dir) === "bin" && STATE_DIR_NAME.test(basename(dirname(dir)));
-	if (env.PATH !== undefined) env.PATH = env.PATH.split(delimiter).filter(dir => !isShimDir(dir)).join(delimiter);
+	if (env.PATH !== undefined) env.PATH = env.PATH.split(":").filter(dir => !isShimDir(dir)).join(":");
 	delete env.OMP_KATA_STATE_DIR;
 	delete env.OMP_KATA_REAL;
 	for (const name of ["PI_SHELL_PREFIX", "CLAUDE_CODE_SHELL_PREFIX"] as const) {
@@ -144,12 +144,17 @@ export interface ShimHostOptions {
 	shimSource?: string;
 	/** Executability probe for the copied shim, injectable because a noexec mount needs privileges. */
 	canExecute?: (path: string) => boolean;
+	/** Platform to assume; default process.platform. Identity delivery is POSIX-only, so win32 never installs. */
+	platform?: NodeJS.Platform;
 }
 
 /** Thrown by ShimHost.install when no candidate root can hold an executable shim. */
 export class ShimUnavailableError extends Error {
-	constructor(readonly attempts: readonly string[]) {
-		super(`no directory allows executing the kata shim (${attempts.join("; ")})`);
+	constructor(
+		readonly attempts: readonly string[],
+		reason?: string,
+	) {
+		super(reason ?? `no directory allows executing the kata shim (${attempts.join("; ")})`);
 		this.name = "ShimUnavailableError";
 	}
 }
@@ -208,6 +213,10 @@ export class ShimHost {
 	private ensureDirs(): { stateDir: string; shimDir: string } {
 		if (this.stateDir && this.shimDir) return { stateDir: this.stateDir, shimDir: this.shimDir };
 		if (this.failure) throw this.failure;
+		if ((this.options.platform ?? process.platform) === "win32") {
+			this.failure = new ShimUnavailableError([], "per-agent identity is POSIX-only (Linux, macOS, WSL) and unavailable on Windows");
+			throw this.failure;
+		}
 		const attempts: string[] = [];
 		for (const root of this.candidateRoots()) {
 			try {
@@ -242,17 +251,17 @@ export class ShimHost {
 	resolveReal(executable: string): string {
 		if (executable.includes("/")) return executable;
 		const path = (this.env.PATH ?? "")
-			.split(delimiter)
+			.split(":")
 			.filter(dir => dir !== "" && dir !== this.shimDir)
-			.join(delimiter);
+			.join(":");
 		return Bun.which(executable, { PATH: path }) ?? executable;
 	}
 
 	/** Creates the state dir and shim, prepends the shim dir to PATH once, exports OMP_KATA_* variables. Idempotent. */
 	install(realExecutable: string): string {
 		const { stateDir, shimDir } = this.ensureDirs();
-		const parts = (this.env.PATH ?? "").split(delimiter);
-		if (!parts.includes(shimDir)) this.env.PATH = [shimDir, ...parts.filter(Boolean)].join(delimiter);
+		const parts = (this.env.PATH ?? "").split(":");
+		if (!parts.includes(shimDir)) this.env.PATH = [shimDir, ...parts.filter(Boolean)].join(":");
 		this.env.OMP_KATA_STATE_DIR = stateDir;
 		this.env.OMP_KATA_REAL = realExecutable;
 		// omp's bash tool rebuilds PATH from the user's rc files, which can put the real kata in front of

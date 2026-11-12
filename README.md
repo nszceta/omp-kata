@@ -24,7 +24,7 @@ cd ~/src/omp-kata && bun install   # types only; runtime has no dependencies
 omp plugin link ~/src/omp-kata
 ```
 
-Requirements: omp ≥ 18.12 (Bun runtime) and `kata` ≥ 0.23 on `PATH` (or set `executable`).
+Requirements: omp ≥ 18.12 (Bun runtime) and `kata` ≥ 0.23 on `PATH` (or set `executable`). Per-agent identity delivery is POSIX-only (Linux, macOS, WSL): it needs a `/bin/sh` shim found through `PATH`. On native Windows the plugin installs no shim, shows one notice that identity is unavailable, and kata commands run with kata's own defaults.
 
 `omp --plugin-dir <path>` is **not** enough: it treats the directory as a Claude-style plugin root (skills, commands) and does not load `omp.extensions`. To try the extension without installing use `omp -e <path-to-this-repo>`.
 
