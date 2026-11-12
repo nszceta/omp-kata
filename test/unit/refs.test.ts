@@ -400,6 +400,19 @@ describe("gitCommitMessages", () => {
 		expect(gitCommitMessages("git commit --file=- <<< fix")).toEqual(["fix"]);
 		expect(gitCommitMessages("git commit -m x <<< kata#abcd")).toEqual(["x"]);
 		expect(gitCommitMessages("cat <<< kata#abcd")).toEqual([]);
+		const lit = (c: string, m: string[]) => expect(gitCommitMessages(c)).toEqual(m);
+		lit('git commit -F - <<< "$(git log -1 --format=%s) (refs kata#abcd)"', ["$(git log -1 --format=%s) (refs kata#abcd)"]);
+		lit('git commit -F - <<< "$(echo x) kata#abcd $(echo y)"', ["$(echo x) kata#abcd $(echo y)"]);
+		lit('git commit -F - <<< "$(echo x)$(echo kata#abcd)"', ["$(echo x)$(echo kata#abcd)"]);
+		lit("git commit -F - <<< \"$(printf 'fix kata#abcd')\"", ["$(printf 'fix kata#abcd')"]);
+		lit("git commit -F - <<< \"`printf 'fix kata#abcd'`\"", ["`printf 'fix kata#abcd'`"]);
+		lit("git commit -F - <<< \"$(printf 'fix kata#abcd\\n\\nbody')\"", ["$(printf 'fix kata#abcd\\n\\nbody')"]);
+		expect(tokenizeCommand('echo "3"<<<x')).toEqual([["echo", "3"]]);
+		expect(tokenizeCommand("echo \\3<<<x")).toEqual([["echo", "3"]]);
+		expect(tokenizeCommand("echo ''3<<<x")).toEqual([["echo", "3"]]);
+		expect(tokenizeCommand("echo x3<<<y")).toEqual([["echo", "x3"]]);
+		expect(tokenizeCommand("(3<<<x cat)")).toEqual([["cat"]]);
+		expect(tokenizeCommand("a;12<<<x b")).toEqual([["a"], ["b"]]);
 	});
 
 	test("every here-document body counts when the message comes from stdin", () => {

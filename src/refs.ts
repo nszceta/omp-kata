@@ -203,7 +203,8 @@ export function scanCommand(command: string): ScannedCommand {
 			i += 2;
 		} else if (ch === "<" && command[i + 1] === "<" && command[i + 2] === "<") {
 			// Here-string: optional fd digits and the operator are dropped; its word is stdin data, not an argument.
-			if (inWord && /^\d+$/.test(word)) {
+			const start = i - word.length;
+			if (inWord && /^\d+$/.test(word) && command.slice(start, i) === word && !/[^\s;&|()]/.test(command[start - 1] ?? " ")) {
 				word = "";
 				inWord = false;
 			}
@@ -615,7 +616,15 @@ export function gitCommitMessages(command: string): string[] {
 	for (const words of segments) commitSegment(words, state);
 	if (!state.stdin) return state.messages;
 	substitutionHeredocs([...segments, hereStrings], heredocs);
-	// A here-string that is a lone substitution feeds that command's output, which is scanned above, not its source text.
-	const literal = hereStrings.filter(text => !(/^\$\(.*\)$/s.test(text) || /^`[^`]*`$/.test(text)));
+	// A lone substitution whose inner command yields bodies feeds that output (scanned above), not its source text.
+	const literal = hereStrings.filter(text => {
+		const lone =
+			(text.startsWith("$(") && balancedEnd(text, 1) === text.length) ||
+			(text.startsWith("`") && text.indexOf("`", 1) === text.length - 1);
+		if (!lone) return true;
+		const inner: string[] = [];
+		substitutionHeredocs([[text]], inner);
+		return inner.length === 0;
+	});
 	return [...state.messages, ...heredocs, ...literal];
 }
