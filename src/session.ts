@@ -116,8 +116,13 @@ export class KataRuntime {
 			this.deps.shim.writeIdentity(sessionId, identity, this.real);
 			this.published.add(sessionId);
 		} catch {
-			// no writable temp dir: identity stays unmanaged and kata falls back to its own defaults
+			// no usable state dir (see takeShimWarning): identity stays unmanaged and kata uses its own defaults
 		}
+	}
+
+	/** One-time user warning that identity is disabled (no root can run the shim); undefined when fine or already shown. */
+	takeShimWarning(): string | undefined {
+		return this.deps.shim.takeFailureNotice();
 	}
 
 	dropIdentity(sessionId: string): void {

@@ -1,6 +1,6 @@
-import { chmodSync, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, delimiter, dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Env } from "./config";
 import { type Identity, shellQuote } from "./identity";
@@ -108,10 +108,59 @@ export function detachInheritedShim(env: Env): void {
 	}
 }
 
+/** True when the kernel lets this process execute `path`: false on a noexec mount (EACCES). */
+function canExecute(path: string): boolean {
+	try {
+		accessSync(path, constants.X_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * True for an absolute path that is a real directory (not a symlink) owned by this user and closed to
+ * group and others. Anything else (for example a user's runtime dir inherited by `sudo -E`) could let
+ * another account swap our state dir for its own, so it is not trusted to hold a shim we will run.
+ */
+function isPrivateOwnDir(path: string): boolean {
+	if (!isAbsolute(path)) return false;
+	try {
+		// Without trailing slashes: `lstat("link/")` follows the link.
+		const stat = lstatSync(path.replace(/\/+$/, "") || "/");
+		return stat.isDirectory() && stat.uid === process.getuid?.() && (stat.mode & 0o077) === 0;
+	} catch {
+		return false;
+	}
+}
+
+export interface ShimHostOptions {
+	/**
+	 * Candidate roots for the state dir, tried in order. A single path or a list; default
+	 * `$XDG_RUNTIME_DIR` (when a private directory of this user; normally exec-allowed) then the OS temp dir.
+	 */
+	tmpRoot?: string | readonly string[];
+	/** Shim script to copy; default: the package's bin/kata. */
+	shimSource?: string;
+	/** Executability probe for the copied shim, injectable because a noexec mount needs privileges. */
+	canExecute?: (path: string) => boolean;
+}
+
+/** Thrown by ShimHost.install when no candidate root can hold an executable shim. */
+export class ShimUnavailableError extends Error {
+	constructor(readonly attempts: readonly string[]) {
+		super(`no directory allows executing the kata shim (${attempts.join("; ")})`);
+		this.name = "ShimUnavailableError";
+	}
+}
+
 /**
  * Delivers per-session kata identity without touching command text. A private per-process state
  * directory holds one env file per omp session id, and a `kata` shim script in a directory prepended
  * to PATH reads the file selected by PI_SESSION_ID (which omp sets for every bash command).
+ *
+ * The state dir lives in the first candidate root where the copied shim is executable: PATH lookup
+ * silently skips files on a noexec mount and would run the real kata, losing every identity.
  *
  * `env` is the environment omp's bash tool inherits: process.env in production, a stand-in in tests.
  */
@@ -119,32 +168,74 @@ export class ShimHost {
 	private stateDir: string | undefined;
 	private shimDir: string | undefined;
 	private exitHook = false;
+	/** Set once every root failed: later installs fail fast instead of retrying on each bash call. */
+	private failure: ShimUnavailableError | undefined;
+	private failureReported = false;
 
 	constructor(
 		private readonly env: Env,
-		private readonly options: { tmpRoot?: string; shimSource?: string } = {},
+		private readonly options: ShimHostOptions = {},
 	) {
 		detachInheritedShim(env);
 	}
 
-	private ensureDirs(): { stateDir: string; shimDir: string } {
-		if (!this.stateDir || !this.shimDir) {
-			const root = this.options.tmpRoot ?? tmpdir();
-			sweepStaleStateDirs(root);
-			this.stateDir = mkdtempSync(join(root, `${STATE_DIR_PREFIX}${process.pid}-`));
-			chmodSync(this.stateDir, 0o700);
-			this.shimDir = join(this.stateDir, "bin");
-			mkdirSync(this.shimDir, { mode: 0o700 });
+	private candidateRoots(): readonly string[] {
+		const configured = this.options.tmpRoot;
+		if (configured !== undefined) return typeof configured === "string" ? [configured] : configured;
+		const runtime = this.env.XDG_RUNTIME_DIR;
+		return runtime && isPrivateOwnDir(runtime) ? [runtime, tmpdir()] : [tmpdir()];
+	}
+
+	/** Creates the state dir and shim in `root`; removes the dir again and throws when the shim cannot run there. */
+	private createIn(root: string): { stateDir: string; shimDir: string } {
+		const stateDir = mkdtempSync(join(root, `${STATE_DIR_PREFIX}${process.pid}-`));
+		try {
+			chmodSync(stateDir, 0o700);
+			const shimDir = join(stateDir, "bin");
+			mkdirSync(shimDir, { mode: 0o700 });
 			// A private copy: independent of the package directory's file modes and location.
-			const target = join(this.shimDir, "kata");
+			const target = join(shimDir, "kata");
 			copyFileSync(this.options.shimSource ?? SHIM_SOURCE, target);
 			chmodSync(target, 0o755);
-			if (!this.exitHook) {
-				this.exitHook = true;
-				process.once("exit", () => this.dispose());
+			if (!(this.options.canExecute ?? canExecute)(target)) throw new Error("not executable (noexec mount?)");
+			return { stateDir, shimDir };
+		} catch (error) {
+			rmSync(stateDir, { recursive: true, force: true });
+			throw error;
+		}
+	}
+
+	private ensureDirs(): { stateDir: string; shimDir: string } {
+		if (this.stateDir && this.shimDir) return { stateDir: this.stateDir, shimDir: this.shimDir };
+		if (this.failure) throw this.failure;
+		const attempts: string[] = [];
+		for (const root of this.candidateRoots()) {
+			try {
+				const dirs = this.createIn(root);
+				sweepStaleStateDirs(root);
+				this.stateDir = dirs.stateDir;
+				this.shimDir = dirs.shimDir;
+				if (!this.exitHook) {
+					this.exitHook = true;
+					process.once("exit", () => this.dispose());
+				}
+				return dirs;
+			} catch (error) {
+				attempts.push(`${root}: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		}
-		return { stateDir: this.stateDir, shimDir: this.shimDir };
+		this.failure = new ShimUnavailableError(attempts);
+		throw this.failure;
+	}
+
+	/**
+	 * Warning text for the user when identity is disabled because no root could hold an executable shim,
+	 * returned once per host (all sessions of the process share it); undefined otherwise.
+	 */
+	takeFailureNotice(): string | undefined {
+		if (!this.failure || this.failureReported) return undefined;
+		this.failureReported = true;
+		return `kata identity disabled: ${this.failure.message}. kata commands run without per-agent identity.`;
 	}
 
 	/** The real executable path: `executable` itself when it has a slash, else the first PATH hit outside the shim dir. */

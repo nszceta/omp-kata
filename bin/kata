@@ -26,9 +26,13 @@ if [ -n "${OMP_KATA_REAL:-}" ] && [ -x "$OMP_KATA_REAL" ] && [ ! -d "$OMP_KATA_R
 fi
 
 # No configured real executable: first `kata` on PATH that is not this shim's own directory.
+# `set -f` stops PATH entries containing * ? [ from being pathname-expanded. The colon is appended inside
+# the variable so that field splitting yields an empty final entry (the current directory), as execvp does.
+set -f
 old_ifs=$IFS
+search_path="$PATH:"
 IFS=:
-for dir in $PATH; do
+for dir in $search_path; do
 	[ -n "$dir" ] || dir=.
 	dir_real=$(CDPATH= cd -- "$dir" 2>/dev/null && pwd -P) || continue
 	[ "$dir_real" = "$self_dir" ] && continue
