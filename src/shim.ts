@@ -69,10 +69,12 @@ const PREFIX_VAR = "__omp_kata_d";
 const PREFIX_END = `unset ${PREFIX_VAR};`;
 
 /**
- * omp runs `${PI_SHELL_PREFIX} ${command}` for every bash command. Ours strips any existing occurrence of
- * the shim dir from PATH and prepends it, so the shim stays first no matter how rc files rebuilt PATH and
- * the persistent shell's PATH never grows. A user's own prefix is kept after ours; a previous
- * omp-kata prefix (other shim dir) is replaced, never stacked.
+ * omp runs `${PI_SHELL_PREFIX} ${command}` for every bash command. Ours strips a LEADING occurrence of the
+ * shim dir from PATH and prepends it, so the shim ends up first no matter how rc files rebuilt PATH, and
+ * PATH does not grow while nothing else prepends to it. Occurrences further back are left alone: omp sources
+ * the rc snapshot once, when the persistent shell is created, and the snapshot's PATH is an absolute
+ * assignment, so nothing re-prepends per command and no duplicates build up. A user's own prefix is kept
+ * after ours; a previous omp-kata prefix (other shim dir) is replaced, never stacked.
  */
 export function composeShellPrefix(shimDir: string, existing: string | undefined): string {
 	const mine = `${PREFIX_VAR}=${shellQuote(shimDir)}; PATH="$${PREFIX_VAR}:\${PATH#"$${PREFIX_VAR}":}"; ${PREFIX_END}`;
