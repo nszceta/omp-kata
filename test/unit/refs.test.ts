@@ -464,3 +464,23 @@ describe("shell keywords and prefix options before kata", () => {
 		expect(gitCommitMessages('if git commit -m "hello"; then echo; fi')).toEqual(["hello"]);
 	});
 });
+
+describe("attention and ref guard agree on claim refs", () => {
+	const cases: [string, string[]][] = [
+		["kata claim abcd foo-bar efgh", ["abcd"]],
+		["kata claim abcd FOO efgh", ["abcd"]],
+		["kata claim abcd efgh", ["abcd", "efgh"]],
+		["kata claim abcd --force efgh", ["abcd"]],
+		["kata claim --if-unowned abcd efgh --agent", ["abcd", "efgh"]],
+		["kata claim --comment hello abcd", ["abcd"]],
+		["kata claim abcd --project p efgh", ["abcd"]],
+		["kata --project p claim abcd efgh", ["abcd", "efgh"]],
+		["kata --as bot --workspace /w claim abcd foo-bar efgh", ["abcd"]],
+		["kata claim p#abcd q#efgh", ["p#abcd", "q#efgh"]],
+		["kata claim foo abcd", ["abcd"]],
+	];
+	test.each(cases)("%s", (command, expected) => {
+		expect(parseRefEvents(command).filter(e => e.action === "claim").map(e => e.ref)).toEqual(expected);
+		expect(kataMentions(command).refs).toEqual(expected);
+	});
+});
