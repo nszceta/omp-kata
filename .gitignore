@@ -2,3 +2,4 @@ node_modules/
 *.tgz
 .kata.local.toml
 .omp/
+/.kata-worktrees/
