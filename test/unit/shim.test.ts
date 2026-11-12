@@ -507,3 +507,46 @@ describe("shim with real kata", () => {
 		}, 30_000);
 	}
 });
+
+describe("bin/kata PATH fallback (OMP_KATA_REAL unset)", () => {
+	const globRoot = join(base, "fallback-glob");
+	const cwdDir = join(base, "fallback-cwd");
+	const fallbackHost = new ShimHost({ PATH: toolDir }, { tmpRoot: base });
+	const fallbackStateDir = fallbackHost.install(fakeA);
+	const fallbackShimDir = join(fallbackStateDir, "bin");
+	fallbackHost.writeIdentity("main", MAIN_ID, undefined);
+
+	afterAll(() => {
+		fallbackHost.dispose();
+		rmSync(globRoot, { recursive: true, force: true });
+		rmSync(cwdDir, { recursive: true, force: true });
+	});
+
+	function fallbackEnv(pathValue: string): Record<string, string> {
+		return { PATH: pathValue, PI_SESSION_ID: "main", OMP_KATA_STATE_DIR: fallbackStateDir };
+	}
+
+	for (const shell of availableShells()) {
+		test(`${shell.name}: a PATH entry with glob characters is searched literally`, () => {
+			// `[b]in` would pathname-match the sibling `bin`, which has no kata, if the entries were expanded
+			writeFake(join(globRoot, "[b]in"), "G");
+			mkdirSync(join(globRoot, "bin"), { recursive: true });
+			const env = fallbackEnv(`${fallbackShimDir}:${join(globRoot, "[b]in")}:${join(globRoot, "bin")}:${toolDir}`);
+			expect(run(shell, "kata x", { env })).toEqual({
+				code: 0,
+				stdout: seen("G", "adam", "UNSET", "adam", "x"),
+				stderr: "",
+			});
+		});
+
+		test(`${shell.name}: a trailing ':' in PATH searches the current directory`, () => {
+			writeFake(cwdDir, "C");
+			const env = fallbackEnv(`${fallbackShimDir}:${toolDir}:`);
+			expect(run(shell, "kata x", { cwd: cwdDir, env })).toEqual({
+				code: 0,
+				stdout: seen("C", "adam", "UNSET", "adam", "x"),
+				stderr: "",
+			});
+		});
+	}
+});
