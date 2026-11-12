@@ -272,6 +272,9 @@ const VALUE_FLAGS: Record<string, true> = {
 	"--superseded-by": true,
 	"--idempotency-key": true,
 	"--if-match": true,
+	"--until": true,
+	"--timeout": true,
+	"--poll-interval": true,
 };
 
 function takesValue(word: string): boolean {
@@ -331,49 +334,109 @@ function findCommandWord(words: string[], names: ReadonlySet<string>): number {
 	return -1;
 }
 
-function parseSegment(words: string[], names: ReadonlySet<string>): RefEvent[] {
-	let i = findCommandWord(words, names);
-	if (i === -1) return [];
-	i++;
-	// Global flags precede the subcommand.
-	let sub: string | undefined;
-	for (; i < words.length; i++) {
-		const word = words[i] as string;
-		if (!word.startsWith("-")) {
-			sub = word;
-			i++;
-			break;
-		}
-		if (takesValue(word)) i++;
-	}
-	if (sub !== "claim" && sub !== "close") return [];
+/**
+ * Subcommands whose leading positional arguments are issue refs. `skip` positionals (an action word
+ * such as `label add`, `meta set`) come first; `many` takes refs until the first flag or non-ref.
+ */
+const REF_POSITIONALS: Record<string, { skip: number; many: boolean }> = {
+	assign: { skip: 0, many: false },
+	claim: { skip: 0, many: true },
+	close: { skip: 0, many: false },
+	comment: { skip: 0, many: false },
+	deadline: { skip: 0, many: false },
+	edit: { skip: 0, many: false },
+	label: { skip: 1, many: false },
+	meta: { skip: 1, many: false },
+	move: { skip: 0, many: false },
+	notify: { skip: 0, many: false },
+	reopen: { skip: 0, many: false },
+	schedule: { skip: 0, many: false },
+	show: { skip: 0, many: false },
+	status: { skip: 0, many: false },
+	unassign: { skip: 0, many: false },
+	wait: { skip: 0, many: true },
+};
 
-	const refs: string[] = [];
-	let dry = false;
-	for (; i < words.length; i++) {
+/** Flags whose value is one or more (comma-separated) issue refs. */
+const REF_VALUE_FLAGS: Record<string, true> = {
+	"--parent": true,
+	"--blocks": true,
+	"--blocked-by": true,
+	"--related": true,
+	"--duplicate-of": true,
+	"--superseded-by": true,
+};
+
+interface Invocation {
+	sub: string | undefined;
+	/** Refs in argument order: ref positionals and ref-valued flags. */
+	refs: { ref: string; positional: boolean }[];
+	projects: string[];
+	dry: boolean;
+}
+
+/**
+ * The one reader of a kata invocation's words after the executable (`from` is the first of them):
+ * global flags (value flags consume the next word), the subcommand, the ref positionals named by
+ * REF_POSITIONALS, ref-valued flags, `--project` and `--dry`.
+ *
+ * Rule for non-ref words: multi-ref commands skip non-refs before the first ref (an unexpanded `$ID`
+ * may hide it); positional refs then run until the first flag or non-ref word. Kata itself rejects `claim <ref> <other> <ref>` ("accepts 1 arg(s), received 3"), so
+ * no later word can name a claimed ref and detection stops at the first non-ref. Flags and `--dry`
+ * are still read to the end of the invocation.
+ */
+function walkInvocation(words: string[], from: number, isRef: (word: string) => boolean): Invocation {
+	const out: Invocation = { sub: undefined, refs: [], projects: [], dry: false };
+	let rule: { skip: number; many: boolean } | undefined;
+	let skipped = 0;
+	let taken = 0;
+	// A skipped leading non-ref (`$ID`) may stand for the ref, so the next flag ends the scan.
+	let stoodIn = false;
+	for (let i = from; i < words.length; i++) {
 		const word = words[i] as string;
 		if (word.startsWith("-")) {
-			if (word === "--dry") dry = true;
-			// design: refs run until the first flag once at least one ref was seen.
-			if (refs.length > 0 && sub === "claim") break;
-			if (takesValue(word)) i++;
+			const eq = word.indexOf("=");
+			const flag = eq === -1 ? word : word.slice(0, eq);
+			const value = eq === -1 ? words[i + 1] : word.slice(eq + 1);
+			const refFlag = Object.hasOwn(REF_VALUE_FLAGS, flag);
+			if (word === "--dry") out.dry = true;
+			if (refFlag) {
+				for (const ref of (value ?? "").split(",")) if (isRef(ref)) out.refs.push({ ref, positional: false });
+			} else if (flag === "--project" && value) out.projects.push(value);
+			if (eq === -1 && (refFlag || takesValue(word))) i++;
+			if (taken > 0 || stoodIn) rule = undefined;
 			continue;
 		}
-		if (isIssueRef(word)) {
-			refs.push(word);
-			// close takes exactly one ref; flags may follow it, so keep scanning only for --dry.
-			if (sub === "close") {
-				for (i++; i < words.length; i++) {
-					const rest = words[i] as string;
-					if (rest === "--dry") dry = true;
-					else if (takesValue(rest)) i++;
-				}
-				break;
-			}
+		if (out.sub === undefined) {
+			out.sub = word;
+			rule = Object.hasOwn(REF_POSITIONALS, word) ? REF_POSITIONALS[word] : undefined;
+			continue;
 		}
+		if (!rule) continue;
+		if (skipped < rule.skip) {
+			skipped++;
+			continue;
+		}
+		if (!isRef(word)) {
+			// Multi-ref commands skip leading non-refs (an unexpanded `$ID`); everything else gives up.
+			if (taken > 0 || !rule.many) rule = undefined;
+			else stoodIn = true;
+			continue;
+		}
+		out.refs.push({ ref: word, positional: true });
+		taken++;
+		if (!rule.many) rule = undefined;
 	}
-	if (dry) return [];
-	return refs.map(ref => ({ action: sub as "claim" | "close", ref }));
+	return out;
+}
+
+function parseSegment(words: string[], names: ReadonlySet<string>): RefEvent[] {
+	const at = findCommandWord(words, names);
+	if (at === -1) return [];
+	const inv = walkInvocation(words, at + 1, isIssueRef);
+	if (inv.dry || (inv.sub !== "claim" && inv.sub !== "close")) return [];
+	const action = inv.sub;
+	return inv.refs.filter(r => r.positional).map(r => ({ action, ref: r.ref }));
 }
 
 /** claim/close events in command order. `names` are the executable basenames to recognise. */
@@ -408,39 +471,6 @@ export function projectRefsIn(text: string): ProjectRef[] {
 	return [...text.matchAll(PROJECT_REF_IN_TEXT)].map(m => ({ project: m[1] as string, id: m[2] as string }));
 }
 
-/**
- * Subcommands whose leading positional arguments are issue refs. `skip` positionals (an action word
- * such as `label add`, `meta set`) come first; `many` takes refs until the first flag or non-ref.
- */
-const REF_POSITIONALS: Record<string, { skip: number; many: boolean }> = {
-	assign: { skip: 0, many: false },
-	claim: { skip: 0, many: true },
-	close: { skip: 0, many: false },
-	comment: { skip: 0, many: false },
-	deadline: { skip: 0, many: false },
-	edit: { skip: 0, many: false },
-	label: { skip: 1, many: false },
-	meta: { skip: 1, many: false },
-	move: { skip: 0, many: false },
-	notify: { skip: 0, many: false },
-	reopen: { skip: 0, many: false },
-	schedule: { skip: 0, many: false },
-	show: { skip: 0, many: false },
-	status: { skip: 0, many: false },
-	unassign: { skip: 0, many: false },
-	wait: { skip: 0, many: true },
-};
-
-/** Flags whose value is one or more (comma-separated) issue refs. */
-const REF_VALUE_FLAGS: Record<string, true> = {
-	"--parent": true,
-	"--blocks": true,
-	"--blocked-by": true,
-	"--related": true,
-	"--duplicate-of": true,
-	"--superseded-by": true,
-};
-
 export interface KataMentions {
 	/** Subcommand of every kata invocation, in command order. */
 	subcommands: string[];
@@ -455,47 +485,14 @@ function isShortOrProjectRef(token: string): boolean {
 }
 
 function collectMentions(words: string[], names: ReadonlySet<string>, out: KataMentions): void {
-	let i = findCommandWord(words, names);
-	if (i === -1) return;
-	const start = i + 1;
-	let sub: string | undefined;
-	let rule: { skip: number; many: boolean } | undefined;
-	let skipped = 0;
-	let taken = 0;
-	for (i++; i < words.length; i++) {
-		const word = words[i] as string;
-		if (word.startsWith("-")) {
-			const eq = word.indexOf("=");
-			const flag = eq === -1 ? word : word.slice(0, eq);
-			const value = eq === -1 ? words[i + 1] : word.slice(eq + 1);
-			const refFlag = Object.hasOwn(REF_VALUE_FLAGS, flag);
-			if (refFlag) out.refs.push(...(value ?? "").split(",").filter(isShortOrProjectRef));
-			else if (flag === "--project" && value) out.projects.push(value);
-			if (eq === -1 && (refFlag || takesValue(word))) i++;
-			if (taken > 0) rule = undefined;
-			continue;
-		}
-		if (sub === undefined) {
-			sub = word;
-			out.subcommands.push(sub);
-			rule = Object.hasOwn(REF_POSITIONALS, sub) ? REF_POSITIONALS[sub] : undefined;
-			continue;
-		}
-		if (!rule) continue;
-		if (skipped < rule.skip) {
-			skipped++;
-			continue;
-		}
-		if (!isShortOrProjectRef(word)) {
-			rule = undefined;
-			continue;
-		}
-		out.refs.push(word);
-		taken++;
-		if (!rule.many) rule = undefined;
-	}
+	const at = findCommandWord(words, names);
+	if (at === -1) return;
+	const inv = walkInvocation(words, at + 1, isShortOrProjectRef);
+	if (inv.sub !== undefined) out.subcommands.push(inv.sub);
+	for (const { ref } of inv.refs) out.refs.push(ref);
+	out.projects.push(...inv.projects);
 	// `<project>#<id>` counts in any argument, flag values and message text included.
-	for (const word of words.slice(start)) {
+	for (const word of words.slice(at + 1)) {
 		for (const ref of projectRefsIn(word)) out.refs.push(`${ref.project}#${ref.id}`);
 	}
 }

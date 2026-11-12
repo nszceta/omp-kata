@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { RefGuard } from "../../src/guard";
 import {
 	gitCommitMessages,
 	isIssueRef,
@@ -481,4 +482,46 @@ describe("redirections", () => {
 	for (const [cmd, expected] of cases) {
 		test(cmd, () => expect(tokenizeCommand(cmd)).toEqual(expected));
 	}
+});
+
+describe("attention and ref guard agree on claim refs", () => {
+	const cases: [string, string[]][] = [
+		["kata claim abcd foo-bar efgh", ["abcd"]],
+		["kata claim abcd FOO efgh", ["abcd"]],
+		["kata claim abcd efgh", ["abcd", "efgh"]],
+		["kata claim abcd --force efgh", ["abcd"]],
+		["kata claim --if-unowned abcd efgh --agent", ["abcd", "efgh"]],
+		["kata claim --comment hello abcd", ["abcd"]],
+		["kata claim abcd --project p efgh", ["abcd"]],
+		["kata --project p claim abcd efgh", ["abcd", "efgh"]],
+		["kata --as bot --workspace /w claim abcd foo-bar efgh", ["abcd"]],
+		["kata claim p#abcd q#efgh", ["p#abcd", "q#efgh"]],
+		["kata claim foo abcd", ["abcd"]],
+	];
+	test.each(cases)("%s", (command, expected) => {
+		expect(parseRefEvents(command).filter(e => e.action === "claim").map(e => e.ref)).toEqual(expected);
+		expect(kataMentions(command).refs).toEqual(expected);
+	});
+});
+
+describe("flag values after a hidden or leading ref are not refs", () => {
+	const cases: [string, string[]][] = [
+		['kata wait "$A" "$B" --until closed --timeout 2h', []],
+		["kata wait $ID --until reply --timeout 30m", []],
+		["kata wait $(cat ids) --until stuck", []],
+		["kata wait ${IDS[@]} --until attention --any", []],
+		["kata wait $ID --timeout 1h30m", []],
+		["kata claim $ID --comment starting work", []],
+		["kata wait --until closed abcd", ["abcd"]],
+		["kata wait abcd efgh --until closed --poll-interval 5s", ["abcd", "efgh"]],
+	];
+	test.each(cases)("%s", (command, expected) => {
+		expect(kataMentions(command).refs).toEqual(expected);
+	});
+
+	test("a later write containing a wait condition is not blocked", () => {
+		const guard = new RefGuard("/ws", undefined, ["kata"]);
+		guard.observeCommand("kata wait $ID --until closed --timeout 2h");
+		expect(guard.find("the issue is closed now")).toBeUndefined();
+	});
 });
