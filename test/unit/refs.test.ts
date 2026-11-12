@@ -19,6 +19,10 @@ describe("tokenizeCommand", () => {
 		expect(tokenizeCommand('echo $"x"')).toEqual([["echo", "x"]]);
 		expect(tokenizeCommand('echo "a\\b"')).toEqual([["echo", "a\\b"]]);
 		expect(tokenizeCommand('echo "a\\"b"')).toEqual([["echo", 'a"b']]);
+		expect(tokenizeCommand("echo $$'\\' && kata claim abcd")).toEqual([["echo", "$$\\"], ["kata", "claim", "abcd"]]);
+		expect(tokenizeCommand('echo $$"x"')).toEqual([["echo", "$$x"]]);
+		expect(tokenizeCommand("echo $$'\\n'")).toEqual([["echo", "$$\\n"]]);
+		expect(tokenizeCommand("echo $$$'x'")).toEqual([["echo", "$$x"]]);
 		expect(tokenizeCommand("kata claim $'ab\\'cd' efgh")).toEqual([["kata", "claim", "ab'cd", "efgh"]]);
 	});
 

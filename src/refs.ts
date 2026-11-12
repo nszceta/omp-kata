@@ -71,6 +71,11 @@ export function tokenizeCommand(command: string): string[][] {
 				i++;
 			}
 			i++;
+		} else if (ch === "$" && command[i + 1] === "$") {
+			// `$$` is the PID parameter; a following quote is an ordinary quote.
+			word += "$$";
+			inWord = true;
+			i += 2;
 		} else if (ch === "$" && command[i + 1] === '"') {
 			// Locale quoting: same as a double-quoted string without the `$`.
 			i++;
