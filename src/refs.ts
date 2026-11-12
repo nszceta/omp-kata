@@ -59,6 +59,29 @@ function isArithmetic(command: string, open: number): boolean {
 	return command[inner - 1] === ")" && command[inner] === ")" && balancedEnd(command, open) === inner + 1;
 }
 
+/**
+ * End index of a redirection operator starting at `i` (fd digits only at a word start), or `i` when there is none.
+ * Heredocs, here-strings and process substitutions are not handled here.
+ */
+function redirectionEnd(command: string, i: number, inWord: boolean): number {
+	let j = i;
+	if (!inWord) while (command[j] !== undefined && command[j]! >= "0" && command[j]! <= "9") j++;
+	const ch = command[j];
+	const next = command[j + 1];
+	if (ch === "&" && j === i && next === ">") return command[j + 2] === ">" ? j + 3 : j + 2;
+	if (ch === ">") {
+		if (next === "(") return i;
+		if (next === ">" || next === "&" || next === "|") return j + 2;
+		return j + 1;
+	}
+	if (ch === "<") {
+		if (next === "<" || next === "(") return i;
+		if (next === ">" || next === "&") return j + 2;
+		return j + 1;
+	}
+	return i;
+}
+
 /** A command's simple-command segments plus the bodies of its here-documents, which are not commands. */
 export interface ScannedCommand {
 	segments: string[][];
@@ -79,15 +102,21 @@ export function scanCommand(command: string): ScannedCommand {
 	let words: string[] = [];
 	let word = "";
 	let inWord = false;
+	let dropNext = false;
 	let i = 0;
 
 	const endWord = () => {
-		if (inWord) words.push(word);
+		if (inWord) {
+			// A redirection target is not an argument.
+			if (dropNext) dropNext = false;
+			else words.push(word);
+		}
 		word = "";
 		inWord = false;
 	};
 	const endSegment = () => {
 		endWord();
+		dropNext = false;
 		if (words.length > 0) segments.push(words);
 		words = [];
 	};
@@ -176,6 +205,11 @@ export function scanCommand(command: string): ScannedCommand {
 			const { word: delimiter, end } = readDelimiter(command, i + (strip ? 3 : 2));
 			if (end > i + 2) pending.push({ delimiter, strip });
 			i = Math.max(end, i + 2);
+		} else if (redirectionEnd(command, i, inWord) > i) {
+			// Redirection operator (with optional fd digits): it and its target word are dropped.
+			endWord();
+			i = redirectionEnd(command, i, false);
+			dropNext = true;
 		} else if (ch === "\n") {
 			endSegment();
 			i++;
