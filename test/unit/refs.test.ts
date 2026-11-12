@@ -48,6 +48,33 @@ describe("tokenizeCommand", () => {
 		expect(tokenizeCommand('kata claim "abcd\\')).toEqual([["kata", "claim", "abcd\\"]]);
 	});
 
+	test("here-document bodies are opaque and not segments; following commands still tokenize", () => {
+		expect(tokenizeCommand("cat > x.sh <<EOF\nkata claim wxyz\nEOF\nkata close abcd")).toEqual([
+			["cat", ">", "x.sh"],
+			["kata", "close", "abcd"],
+		]);
+		expect(tokenizeCommand("cat<<EOF;echo a\nbody; echo b\nEOF")).toEqual([["cat"], ["echo", "a"]]);
+	});
+
+	test("<<- strips leading tabs of the delimiter line only; plain << does not", () => {
+		expect(tokenizeCommand("cat <<-EOF\n\tbody\n\t\tEOF\necho after")).toEqual([["cat"], ["echo", "after"]]);
+		expect(tokenizeCommand("cat <<EOF\n\tEOF\nkata claim abcd\nEOF\necho after")).toEqual([["cat"], ["echo", "after"]]);
+	});
+
+	test("quoted delimiters, several heredocs on one line, and unterminated bodies", () => {
+		expect(tokenizeCommand("cat <<'A' <<\"B\"\nx\nA\ny\nB\necho z")).toEqual([["cat"], ["echo", "z"]]);
+		expect(tokenizeCommand("cat <<EOF\nkata claim abcd")).toEqual([["cat"]]);
+	});
+
+	test("here-strings and quoted << are not here-documents", () => {
+		expect(tokenizeCommand("cat <<< word\necho a")).toEqual([["cat", "<<<", "word"], ["echo", "a"]]);
+		expect(tokenizeCommand("echo 'x <<EOF'\nkata claim abcd\nEOF")).toEqual([
+			["echo", "x <<EOF"],
+			["kata", "claim", "abcd"],
+			["EOF"],
+		]);
+	});
+
 	test("empty and operator-only input yields no segments", () => {
 		expect(tokenizeCommand("")).toEqual([]);
 		expect(tokenizeCommand(" ; && | \n")).toEqual([]);
@@ -154,6 +181,11 @@ describe("claim parsing", () => {
 		expect(parseRefEvents("cat .kata.toml claim abcd")).toEqual([]);
 	});
 
+	test("kata commands written inside a here-document body are not claims", () => {
+		expect(parseRefEvents("cat > x.sh <<EOF\nkata claim wxyz\nEOF")).toEqual([]);
+		expect(parseRefEvents("cat <<'EOF' > x.sh\nkata close wxyz\nEOF\nkata claim abcd")).toEqual([{ action: "claim", ref: "abcd" }]);
+	});
+
 	test("other kata subcommands do not claim", () => {
 		expect(parseRefEvents("kata show abcd")).toEqual([]);
 		expect(parseRefEvents("kata list claim abcd")).toEqual([]);
@@ -250,6 +282,10 @@ describe("shell constructs that must not leak words into the outer command", () 
 });
 
 describe("kataMentions", () => {
+	test("here-document bodies mention nothing", () => {
+		expect(kataMentions("cat > x.sh <<EOF\nkata show build\nEOF")).toEqual({ refs: [], projects: [], subcommands: [] });
+	});
+
 	test("ref positionals per subcommand; subcommand and action words are never refs", () => {
 		expect(kataMentions("kata show q7x2 --json && kata claim a1b2 c3d4 --agent && kata label add e5f6 needs-review")).toEqual({
 			subcommands: ["show", "claim", "label"],
@@ -306,6 +342,15 @@ describe("gitCommitMessages", () => {
 		expect(gitCommitMessages(stdin)).toEqual(["subject\n\nbody line"]);
 		expect(gitCommitMessages("git commit --file=- <<-EOF\n\tsubject\n\tEOF")).toEqual(["\tsubject"]);
 		expect(gitCommitMessages("cat <<'EOF' > f\nsubject\nEOF\ngit commit -m x")).toEqual(["x"]);
+	});
+
+	test("a quoted << is not a here-document, and non-stdin heredocs are ignored", () => {
+		expect(gitCommitMessages("echo 'x <<EOF'\ngit commit -F -\nfoo\nEOF")).toEqual([]);
+		expect(gitCommitMessages("git commit -F - <<< msg")).toEqual([]);
+	});
+
+	test("every here-document body counts when the message comes from stdin", () => {
+		expect(gitCommitMessages("git commit -F - <<A <<B\none\nA\ntwo\nB")).toEqual(["one", "two"]);
 	});
 
 	test("a $(cat <<EOF ...) message keeps its body in the -m value", () => {

@@ -24,9 +24,49 @@ function balancedEnd(command: string, open: number): number {
 	return command.length;
 }
 
+/** Characters that end an unquoted here-document delimiter word. */
+const DELIMITER_END = new Set([" ", "\t", "\r", "\n", ";", "|", "&", "(", ")", "<", ">"]);
+
+/** Reads the here-document delimiter word starting at `from`; its quoting is removed. `end` is the index just past it. */
+function readDelimiter(command: string, from: number): { word: string; end: number } {
+	let i = from;
+	while (command[i] === " " || command[i] === "\t") i++;
+	let word = "";
+	while (i < command.length && !DELIMITER_END.has(command[i] as string)) {
+		const ch = command[i] as string;
+		if (ch === "'" || ch === '"') {
+			const close = command.indexOf(ch, i + 1);
+			const end = close === -1 ? command.length : close;
+			word += command.slice(i + 1, end);
+			i = end + 1;
+		} else if (ch === "\\" && i + 1 < command.length) {
+			word += command[i + 1];
+			i += 2;
+		} else {
+			word += ch;
+			i++;
+		}
+	}
+	return { word, end: Math.min(i, command.length) };
+}
+
+/** A command's simple-command segments plus the bodies of its here-documents, which are not commands. */
+export interface ScannedCommand {
+	segments: string[][];
+	/** Here-document bodies in source order, delimiter line excluded; `<<-` bodies keep their leading tabs. */
+	heredocs: string[];
+}
+
 /** Splits a command into simple-command segments of unquoted words. Shell expansions are left as raw text. */
 export function tokenizeCommand(command: string): string[][] {
+	return scanCommand(command).segments;
+}
+
+/** One pass over a command: segments as in {@link tokenizeCommand}, with here-document bodies skipped and returned apart. */
+export function scanCommand(command: string): ScannedCommand {
 	const segments: string[][] = [];
+	const heredocs: string[] = [];
+	const pending: { delimiter: string; strip: boolean }[] = [];
 	let words: string[] = [];
 	let word = "";
 	let inWord = false;
@@ -82,7 +122,35 @@ export function tokenizeCommand(command: string): string[][] {
 				inWord = true;
 			}
 			i += 2;
-		} else if (ch === "\n" || ch === ";" || ch === "|" || ch === "&" || ch === "(" || ch === ")") {
+		} else if (ch === "<" && command[i + 1] === "<" && command[i + 2] === "<") {
+			// Here-string: its word is data, not a delimiter.
+			word += "<<<";
+			inWord = true;
+			i += 3;
+		} else if (ch === "<" && command[i + 1] === "<") {
+			// Here-document: the delimiter is consumed now, the body at the next newline.
+			endWord();
+			const strip = command[i + 2] === "-";
+			const { word: delimiter, end } = readDelimiter(command, i + (strip ? 3 : 2));
+			if (end > i + 2) pending.push({ delimiter, strip });
+			i = Math.max(end, i + 2);
+		} else if (ch === "\n") {
+			endSegment();
+			i++;
+			while (pending.length > 0 && i < command.length) {
+				const { delimiter, strip } = pending.shift() as { delimiter: string; strip: boolean };
+				const body: string[] = [];
+				while (i < command.length) {
+					const eol = command.indexOf("\n", i);
+					const line = command.slice(i, eol === -1 ? command.length : eol);
+					i = eol === -1 ? command.length : eol + 1;
+					if ((strip ? line.replace(/^\t+/, "") : line) === delimiter) break;
+					body.push(line);
+				}
+				heredocs.push(body.join("\n"));
+			}
+			pending.length = 0;
+		} else if (ch === ";" || ch === "|" || ch === "&" || ch === "(" || ch === ")") {
 			endSegment();
 			i++;
 		} else if (ch === " " || ch === "\t" || ch === "\r") {
@@ -97,7 +165,7 @@ export function tokenizeCommand(command: string): string[][] {
 		}
 	}
 	endSegment();
-	return segments;
+	return { segments, heredocs };
 }
 
 /** Global flags (and claim/close flags) that consume the following word as their value. */
@@ -397,30 +465,13 @@ function commitSegment(words: string[], state: { messages: string[]; stdin: bool
 	}
 }
 
-const HEREDOC = /(?<!<)<<(?!<)(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/g;
-
-/** Bodies of the here-documents in a command (`<<EOF`, `<<-'EOF'`, ...). */
-function heredocBodies(command: string): string[] {
-	const bodies: string[] = [];
-	for (const match of command.matchAll(HEREDOC)) {
-		const start = command.indexOf("\n", (match.index ?? 0) + match[0].length);
-		if (start === -1) continue;
-		const body: string[] = [];
-		for (const line of command.slice(start + 1).split("\n")) {
-			if ((match[1] ? line.replace(/^\t+/, "") : line) === match[3]) break;
-			body.push(line);
-		}
-		bodies.push(body.join("\n"));
-	}
-	return bodies;
-}
-
 /**
  * Commit message text a bash command hands to `git commit`: `-m`/`--message` and `--trailer` values,
  * plus the command's here-document bodies when the message is read from stdin (`-F-`, `--file=-`).
  */
 export function gitCommitMessages(command: string): string[] {
 	const state = { messages: [] as string[], stdin: false };
-	for (const words of tokenizeCommand(command)) commitSegment(words, state);
-	return state.stdin ? [...state.messages, ...heredocBodies(command)] : state.messages;
+	const { segments, heredocs } = scanCommand(command);
+	for (const words of segments) commitSegment(words, state);
+	return state.stdin ? [...state.messages, ...heredocs] : state.messages;
 }
