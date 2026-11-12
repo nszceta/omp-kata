@@ -77,6 +77,13 @@ describe("write", () => {
 		expect(await write("a.md", "m3k9 r5t6")).toBeUndefined();
 	});
 
+	test("a script written through a heredoc teaches nothing from its body", async () => {
+		await bash("cat > run.sh <<'EOF'\nkata show build\nEOF");
+		expect(await write("a.md", "run the build first")).toBeUndefined();
+		await bash("kata show q7x2");
+		expect(await write("a.md", "build q7x2")).toEqual({ block: true, reason: reasonFor("q7x2", "a.md") });
+	});
+
 	test("an unseen 4-char token passes; seen ids match on word boundaries only", async () => {
 		await bash("kata show q7x2");
 		expect(await write("a.md", "w4n8 and xq7x2 and q7x2y")).toBeUndefined();

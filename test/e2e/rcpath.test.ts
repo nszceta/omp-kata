@@ -2,6 +2,24 @@ import { describe, expect, test } from "bun:test";
 import type { Script } from "../fixtures/e2e/fake-provider.ts";
 import { ACTOR, issuedBashCommands, SHORT_ID, spawnedAgentId, T, withEnv } from "./harness.ts";
 
+const SHIM_KATA = /\/omp-kata-\d+-[A-Za-z0-9]{6}\/bin\/kata$/;
+
+/**
+ * `command -v kata` as seen by a bash command must be the shim. With a rc-built PATH that is only
+ * true if omp applied the PI_SHELL_PREFIX the plugin installs; say so when it did not, instead of
+ * failing later on a wrong author.
+ */
+function expectShimResolved(where: string, resolved: string): void {
+	if (SHIM_KATA.test(resolved)) return;
+	throw new Error(
+		`${where}: \`kata\` resolved to ${JSON.stringify(resolved)}, not the omp-kata shim. The plugin restores the shim ` +
+			"on PATH by injecting shell statements through PI_SHELL_PREFIX, which omp must apply as the string " +
+			"`${prefix} ${command}` from a shell config built after the plugin installed it (see the README identity " +
+			"section, \"omp behavior the PATH restoration depends on\"). This omp does not do that: check its bash " +
+			"executor and shell config cache.",
+	);
+}
+
 /**
  * A user's ~/.bashrc that prepends the real kata dir to PATH must not defeat the identity shim
  * (omp sources the rc snapshot before every bash command).
@@ -34,7 +52,7 @@ describe("rc file puts real kata first on PATH", () => {
 			expect(res.code).toBe(0);
 			const agentId = spawnedAgentId(res);
 
-			for (const f of ["main_kata1", "main_kata2", "kid_kata1"]) expect(env.file(f)).toMatch(/kata$/);
+			for (const f of ["main_kata1", "main_kata2", "kid_kata1"]) expectShimResolved(f, env.file(f));
 
 			const c = (f: string) => JSON.parse(env.file(f)).comment;
 			for (const f of ["main1.json", "main2.json"]) {

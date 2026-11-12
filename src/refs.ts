@@ -24,21 +24,107 @@ function balancedEnd(command: string, open: number): number {
 	return command.length;
 }
 
+/** Characters whose ANSI-C escape yields the character itself. */
+const ANSI_C_PLAIN = `'"\\?`;
+
+/** Characters that end an unquoted here-document delimiter word. */
+const DELIMITER_END = new Set([" ", "\t", "\r", "\n", ";", "|", "&", "(", ")", "<", ">"]);
+
+/** Reads the here-document delimiter word starting at `from`; its quoting is removed. `end` is the index just past it. */
+function readDelimiter(command: string, from: number): { word: string; end: number } {
+	let i = from;
+	while (command[i] === " " || command[i] === "\t") i++;
+	let word = "";
+	while (i < command.length && !DELIMITER_END.has(command[i] as string)) {
+		const ch = command[i] as string;
+		if (ch === "'" || ch === '"') {
+			const close = command.indexOf(ch, i + 1);
+			const end = close === -1 ? command.length : close;
+			word += command.slice(i + 1, end);
+			i = end + 1;
+		} else if (ch === "\\" && i + 1 < command.length) {
+			word += command[i + 1];
+			i += 2;
+		} else {
+			word += ch;
+			i++;
+		}
+	}
+	return { word, end: Math.min(i, command.length) };
+}
+
+/** Whether the `((` at `open` closes with an adjacent `))`, i.e. is arithmetic rather than nested subshells. */
+function isArithmetic(command: string, open: number): boolean {
+	const inner = balancedEnd(command, open + 1);
+	return command[inner - 1] === ")" && command[inner] === ")" && balancedEnd(command, open) === inner + 1;
+}
+
+/**
+ * End index of a redirection operator starting at `i` (fd digits only at a word start), or `i` when there is none.
+ * Here-documents, here-strings (`<<<`, handled in {@link scanCommand}) and process substitutions are not handled here.
+ */
+function redirectionEnd(command: string, i: number, inWord: boolean): number {
+	let j = i;
+	if (!inWord) while (command[j] !== undefined && command[j]! >= "0" && command[j]! <= "9") j++;
+	const ch = command[j];
+	const next = command[j + 1];
+	if (ch === "&" && j === i && next === ">") return command[j + 2] === ">" ? j + 3 : j + 2;
+	if (ch === ">") {
+		if (next === "(") return i;
+		if (next === ">" || next === "&" || next === "|") return j + 2;
+		return j + 1;
+	}
+	if (ch === "<") {
+		if (next === "<" || next === "(") return i;
+		if (next === ">" || next === "&") return j + 2;
+		return j + 1;
+	}
+	return i;
+}
+
+/** A command's simple-command segments plus the bodies of its here-documents, which are not commands. */
+export interface ScannedCommand {
+	segments: string[][];
+	/** Here-document bodies in source order, delimiter line excluded; `<<-` bodies keep their leading tabs. */
+	heredocs: string[];
+	/** Here-string words (`<<<word`) in source order, quotes removed. */
+	hereStrings: string[];
+}
+
 /** Splits a command into simple-command segments of unquoted words. Shell expansions are left as raw text. */
 export function tokenizeCommand(command: string): string[][] {
+	return scanCommand(command).segments;
+}
+
+/** One pass over a command: segments as in {@link tokenizeCommand}, with here-document bodies skipped and returned apart. */
+export function scanCommand(command: string): ScannedCommand {
 	const segments: string[][] = [];
+	const heredocs: string[] = [];
+	const hereStrings: string[] = [];
+	const pending: { delimiter: string; strip: boolean }[] = [];
 	let words: string[] = [];
 	let word = "";
 	let inWord = false;
+	let dropNext = false;
+	let hereNext = false;
 	let i = 0;
 
 	const endWord = () => {
-		if (inWord) words.push(word);
+		if (inWord) {
+			// A redirection target is not an argument.
+			if (hereNext) {
+				hereNext = false;
+				hereStrings.push(word);
+			} else if (dropNext) dropNext = false;
+			else words.push(word);
+		}
 		word = "";
 		inWord = false;
 	};
 	const endSegment = () => {
 		endWord();
+		dropNext = false;
+		hereNext = false;
 		if (words.length > 0) segments.push(words);
 		words = [];
 	};
@@ -55,9 +141,42 @@ export function tokenizeCommand(command: string): string[][] {
 			i++;
 			inWord = true;
 			while (i < command.length && command[i] !== '"') {
-				if (command[i] === "\\" && i + 1 < command.length) i++;
+				if (command[i] === "\\" && i + 1 < command.length) {
+					const next = command[i + 1] as string;
+					if (next === "\n") {
+						i += 2;
+						continue;
+					}
+					// POSIX: backslash is removed only before $ ` " \ and newline.
+					if (next === "$" || next === "`" || next === '"' || next === "\\") i++;
+				}
 				word += command[i];
 				i++;
+			}
+			i++;
+		} else if (ch === "$" && command[i + 1] === "$") {
+			// `$$` is the PID parameter; a following quote is an ordinary quote.
+			word += "$$";
+			inWord = true;
+			i += 2;
+		} else if (ch === "$" && command[i + 1] === '"') {
+			// Locale quoting: same as a double-quoted string without the `$`.
+			i++;
+		} else if (ch === "$" && command[i + 1] === "'") {
+			i += 2;
+			inWord = true;
+			while (i < command.length && command[i] !== "'") {
+				if (command[i] === "\\" && i + 1 < command.length) {
+					const esc = command[i + 1] as string;
+					i += 2;
+					if (esc === "n") word += "\n";
+					else if (esc === "t") word += "\t";
+					else if (esc === "r") word += "\r";
+					else word += ANSI_C_PLAIN.includes(esc) ? esc : `\\${esc}`;
+				} else {
+					word += command[i];
+					i++;
+				}
 			}
 			i++;
 		} else if (ch === "$" && command[i + 1] === "(") {
@@ -82,7 +201,50 @@ export function tokenizeCommand(command: string): string[][] {
 				inWord = true;
 			}
 			i += 2;
-		} else if (ch === "\n" || ch === ";" || ch === "|" || ch === "&" || ch === "(" || ch === ")") {
+		} else if (ch === "<" && command[i + 1] === "<" && command[i + 2] === "<") {
+			// Here-string: optional fd digits and the operator are dropped; its word is stdin data, not an argument.
+			const start = i - word.length;
+			if (inWord && /^\d+$/.test(word) && command.slice(start, i) === word && !/[^\s;&|()]/.test(command[start - 1] ?? " ")) {
+				word = "";
+				inWord = false;
+			}
+			endWord();
+			hereNext = true;
+			i += 3;
+		} else if (ch === "<" && command[i + 1] === "<") {
+			// Here-document: the delimiter is consumed now, the body at the next newline.
+			endWord();
+			const strip = command[i + 2] === "-";
+			const { word: delimiter, end } = readDelimiter(command, i + (strip ? 3 : 2));
+			if (end > i + 2) pending.push({ delimiter, strip });
+			i = Math.max(end, i + 2);
+		} else if (redirectionEnd(command, i, inWord) > i) {
+			// Redirection operator (with optional fd digits): it and its target word are dropped.
+			endWord();
+			i = redirectionEnd(command, i, false);
+			dropNext = true;
+		} else if (ch === "\n") {
+			endSegment();
+			i++;
+			while (pending.length > 0 && i < command.length) {
+				const { delimiter, strip } = pending.shift() as { delimiter: string; strip: boolean };
+				const body: string[] = [];
+				while (i < command.length) {
+					const eol = command.indexOf("\n", i);
+					const line = command.slice(i, eol === -1 ? command.length : eol);
+					i = eol === -1 ? command.length : eol + 1;
+					const text = line.endsWith("\r") ? line.slice(0, -1) : line;
+					if ((strip ? text.replace(/^\t+/, "") : text) === delimiter) break;
+					body.push(line);
+				}
+				heredocs.push(body.join("\n"));
+			}
+			pending.length = 0;
+		} else if (ch === "(" && command[i + 1] === "(" && !inWord && isArithmetic(command, i)) {
+			// Bare `(( ... ))` / `for (( ... ))`: arithmetic, where `<<` is a shift rather than a here-document.
+			endSegment();
+			i = balancedEnd(command, i);
+		} else if (ch === ";" || ch === "|" || ch === "&" || ch === "(" || ch === ")") {
 			endSegment();
 			i++;
 		} else if (ch === " " || ch === "\t" || ch === "\r") {
@@ -97,7 +259,7 @@ export function tokenizeCommand(command: string): string[][] {
 		}
 	}
 	endSegment();
-	return segments;
+	return { segments, heredocs, hereStrings };
 }
 
 /** Global flags (and claim/close flags) that consume the following word as their value. */
@@ -123,6 +285,9 @@ const VALUE_FLAGS: Record<string, true> = {
 	"--superseded-by": true,
 	"--idempotency-key": true,
 	"--if-match": true,
+	"--until": true,
+	"--timeout": true,
+	"--poll-interval": true,
 };
 
 function takesValue(word: string): boolean {
@@ -144,92 +309,42 @@ function basename(token: string): string {
 	return slash === -1 ? token : token.slice(slash + 1);
 }
 
-/** Index of the executable word in a segment if its basename is in `names`, skipping leading `VAR=x`, `env`, `command`, ... words. */
+const RESERVED_PREFIX = new Set(["if", "then", "elif", "else", "do", "while", "until", "!", "{"]);
+/** Options of prefix commands that consume the next word; short flags match exactly, long flags only without `=`. */
+const PREFIX_VALUE_OPTIONS: Record<string, ReadonlySet<string>> = {
+	env: new Set(["-u", "--unset", "-C", "--chdir"]),
+	exec: new Set(["-a"]),
+};
+
+/** Index of the executable word in a segment if its basename is in `names`, skipping leading `VAR=x`, reserved words, and prefix commands with their options. */
 function findCommandWord(words: string[], names: ReadonlySet<string>): number {
+	let prefix: string | undefined;
 	for (let i = 0; i < words.length; i++) {
 		const word = words[i] as string;
-		const bare = word.replace(/^[({]+/, "");
-		if (bare === "" || ASSIGNMENT.test(bare) || Object.hasOwn(PREFIX_COMMANDS, bare)) continue;
-		return names.has(basename(bare)) ? i : -1;
-	}
-	return -1;
-}
-
-function parseSegment(words: string[], names: ReadonlySet<string>): RefEvent[] {
-	let i = findCommandWord(words, names);
-	if (i === -1) return [];
-	i++;
-	// Global flags precede the subcommand.
-	let sub: string | undefined;
-	for (; i < words.length; i++) {
-		const word = words[i] as string;
-		if (!word.startsWith("-")) {
-			sub = word;
-			i++;
-			break;
+		const bare = prefix === undefined ? word.replace(/^[({]+/, "") : word;
+		if (bare === "" || ASSIGNMENT.test(bare)) continue;
+		if (prefix === undefined) {
+			if (RESERVED_PREFIX.has(bare)) continue;
+			if (Object.hasOwn(PREFIX_COMMANDS, bare)) {
+				prefix = bare;
+				continue;
+			}
+			return names.has(basename(bare)) ? i : -1;
 		}
-		if (takesValue(word)) i++;
-	}
-	if (sub !== "claim" && sub !== "close") return [];
-
-	const refs: string[] = [];
-	let dry = false;
-	for (; i < words.length; i++) {
-		const word = words[i] as string;
-		if (word.startsWith("-")) {
-			if (word === "--dry") dry = true;
-			// design: refs run until the first flag once at least one ref was seen.
-			if (refs.length > 0 && sub === "claim") break;
-			if (takesValue(word)) i++;
+		if (word === "--") {
+			prefix = undefined;
 			continue;
 		}
-		if (isIssueRef(word)) {
-			refs.push(word);
-			// close takes exactly one ref; flags may follow it, so keep scanning only for --dry.
-			if (sub === "close") {
-				for (i++; i < words.length; i++) {
-					const rest = words[i] as string;
-					if (rest === "--dry") dry = true;
-					else if (takesValue(rest)) i++;
-				}
-				break;
-			}
+		if (word.startsWith("-") && word.length > 1) {
+			if (prefix === "env" && /^(?:-[0iv]*S|--split-string(?:=|$))/.test(word)) return -1;
+			if (prefix === "command" && /^-[pvV]*[vV]/.test(word)) return -1;
+			if (PREFIX_VALUE_OPTIONS[prefix]?.has(word)) i++;
+			continue;
 		}
+		prefix = undefined;
+		i--;
 	}
-	if (dry) return [];
-	return refs.map(ref => ({ action: sub as "claim" | "close", ref }));
-}
-
-/** claim/close events in command order. `names` are the executable basenames to recognise. */
-export function parseRefEvents(command: string, names: readonly string[] = ["kata"]): RefEvent[] {
-	const nameSet = new Set(names);
-	const events: RefEvent[] = [];
-	for (const words of tokenizeCommand(command)) events.push(...parseSegment(words, nameSet));
-	return events;
-}
-
-export function parseClaimRefs(command: string, names?: readonly string[]): string[] {
-	return unique(parseRefEvents(command, names).filter(e => e.action === "claim").map(e => e.ref));
-}
-
-export function parseCloseRefs(command: string, names?: readonly string[]): string[] {
-	return unique(parseRefEvents(command, names).filter(e => e.action === "close").map(e => e.ref));
-}
-
-function unique(items: string[]): string[] {
-	return [...new Set(items)];
-}
-
-/** `<project>#<id>` inside free text; the lookarounds keep URL fragments and `key=a#b` values out. */
-const PROJECT_REF_IN_TEXT = /(?<![A-Za-z0-9._\-/?=&#@])([A-Za-z0-9][A-Za-z0-9._-]*)#([a-z0-9]{4,12})(?![A-Za-z0-9_=-])/g;
-
-export interface ProjectRef {
-	project: string;
-	id: string;
-}
-
-export function projectRefsIn(text: string): ProjectRef[] {
-	return [...text.matchAll(PROJECT_REF_IN_TEXT)].map(m => ({ project: m[1] as string, id: m[2] as string }));
+	return -1;
 }
 
 /**
@@ -265,6 +380,110 @@ const REF_VALUE_FLAGS: Record<string, true> = {
 	"--superseded-by": true,
 };
 
+interface Invocation {
+	sub: string | undefined;
+	/** Refs in argument order: ref positionals and ref-valued flags. */
+	refs: { ref: string; positional: boolean }[];
+	projects: string[];
+	dry: boolean;
+}
+
+/**
+ * The one reader of a kata invocation's words after the executable (`from` is the first of them):
+ * global flags (value flags consume the next word), the subcommand, the ref positionals named by
+ * REF_POSITIONALS, ref-valued flags, `--project` and `--dry`.
+ *
+ * Rule for non-ref words: multi-ref commands skip non-refs before the first ref (an unexpanded `$ID`
+ * may hide it); positional refs then run until the first flag or non-ref word. Kata itself rejects `claim <ref> <other> <ref>` ("accepts 1 arg(s), received 3"), so
+ * no later word can name a claimed ref and detection stops at the first non-ref. Flags and `--dry`
+ * are still read to the end of the invocation.
+ */
+function walkInvocation(words: string[], from: number, isRef: (word: string) => boolean): Invocation {
+	const out: Invocation = { sub: undefined, refs: [], projects: [], dry: false };
+	let rule: { skip: number; many: boolean } | undefined;
+	let skipped = 0;
+	let taken = 0;
+	// A skipped leading non-ref (`$ID`) may stand for the ref, so the next flag ends the scan.
+	let stoodIn = false;
+	for (let i = from; i < words.length; i++) {
+		const word = words[i] as string;
+		if (word.startsWith("-")) {
+			const eq = word.indexOf("=");
+			const flag = eq === -1 ? word : word.slice(0, eq);
+			const value = eq === -1 ? words[i + 1] : word.slice(eq + 1);
+			const refFlag = Object.hasOwn(REF_VALUE_FLAGS, flag);
+			if (word === "--dry") out.dry = true;
+			if (refFlag) {
+				for (const ref of (value ?? "").split(",")) if (isRef(ref)) out.refs.push({ ref, positional: false });
+			} else if (flag === "--project" && value) out.projects.push(value);
+			if (eq === -1 && (refFlag || takesValue(word))) i++;
+			if (taken > 0 || stoodIn) rule = undefined;
+			continue;
+		}
+		if (out.sub === undefined) {
+			out.sub = word;
+			rule = Object.hasOwn(REF_POSITIONALS, word) ? REF_POSITIONALS[word] : undefined;
+			continue;
+		}
+		if (!rule) continue;
+		if (skipped < rule.skip) {
+			skipped++;
+			continue;
+		}
+		if (!isRef(word)) {
+			// Multi-ref commands skip leading non-refs (an unexpanded `$ID`); everything else gives up.
+			if (taken > 0 || !rule.many) rule = undefined;
+			else stoodIn = true;
+			continue;
+		}
+		out.refs.push({ ref: word, positional: true });
+		taken++;
+		if (!rule.many) rule = undefined;
+	}
+	return out;
+}
+
+function parseSegment(words: string[], names: ReadonlySet<string>): RefEvent[] {
+	const at = findCommandWord(words, names);
+	if (at === -1) return [];
+	const inv = walkInvocation(words, at + 1, isIssueRef);
+	if (inv.dry || (inv.sub !== "claim" && inv.sub !== "close")) return [];
+	const action = inv.sub;
+	return inv.refs.filter(r => r.positional).map(r => ({ action, ref: r.ref }));
+}
+
+/** claim/close events in command order. `names` are the executable basenames to recognise. */
+export function parseRefEvents(command: string, names: readonly string[] = ["kata"]): RefEvent[] {
+	const nameSet = new Set(names);
+	const events: RefEvent[] = [];
+	for (const words of tokenizeCommand(command)) events.push(...parseSegment(words, nameSet));
+	return events;
+}
+
+export function parseClaimRefs(command: string, names?: readonly string[]): string[] {
+	return unique(parseRefEvents(command, names).filter(e => e.action === "claim").map(e => e.ref));
+}
+
+export function parseCloseRefs(command: string, names?: readonly string[]): string[] {
+	return unique(parseRefEvents(command, names).filter(e => e.action === "close").map(e => e.ref));
+}
+
+function unique(items: string[]): string[] {
+	return [...new Set(items)];
+}
+
+/** `<project>#<id>` inside free text; the lookarounds keep URL fragments and `key=a#b` values out. */
+const PROJECT_REF_IN_TEXT = /(?<![A-Za-z0-9._\-/?=&#@])([A-Za-z0-9][A-Za-z0-9._-]*)#([a-z0-9]{4,12})(?![A-Za-z0-9_=-])/g;
+
+export interface ProjectRef {
+	project: string;
+	id: string;
+}
+
+export function projectRefsIn(text: string): ProjectRef[] {
+	return [...text.matchAll(PROJECT_REF_IN_TEXT)].map(m => ({ project: m[1] as string, id: m[2] as string }));
+}
+
 export interface KataMentions {
 	/** Subcommand of every kata invocation, in command order. */
 	subcommands: string[];
@@ -279,47 +498,14 @@ function isShortOrProjectRef(token: string): boolean {
 }
 
 function collectMentions(words: string[], names: ReadonlySet<string>, out: KataMentions): void {
-	let i = findCommandWord(words, names);
-	if (i === -1) return;
-	const start = i + 1;
-	let sub: string | undefined;
-	let rule: { skip: number; many: boolean } | undefined;
-	let skipped = 0;
-	let taken = 0;
-	for (i++; i < words.length; i++) {
-		const word = words[i] as string;
-		if (word.startsWith("-")) {
-			const eq = word.indexOf("=");
-			const flag = eq === -1 ? word : word.slice(0, eq);
-			const value = eq === -1 ? words[i + 1] : word.slice(eq + 1);
-			const refFlag = Object.hasOwn(REF_VALUE_FLAGS, flag);
-			if (refFlag) out.refs.push(...(value ?? "").split(",").filter(isShortOrProjectRef));
-			else if (flag === "--project" && value) out.projects.push(value);
-			if (eq === -1 && (refFlag || takesValue(word))) i++;
-			if (taken > 0) rule = undefined;
-			continue;
-		}
-		if (sub === undefined) {
-			sub = word;
-			out.subcommands.push(sub);
-			rule = Object.hasOwn(REF_POSITIONALS, sub) ? REF_POSITIONALS[sub] : undefined;
-			continue;
-		}
-		if (!rule) continue;
-		if (skipped < rule.skip) {
-			skipped++;
-			continue;
-		}
-		if (!isShortOrProjectRef(word)) {
-			rule = undefined;
-			continue;
-		}
-		out.refs.push(word);
-		taken++;
-		if (!rule.many) rule = undefined;
-	}
+	const at = findCommandWord(words, names);
+	if (at === -1) return;
+	const inv = walkInvocation(words, at + 1, isShortOrProjectRef);
+	if (inv.sub !== undefined) out.subcommands.push(inv.sub);
+	for (const { ref } of inv.refs) out.refs.push(ref);
+	out.projects.push(...inv.projects);
 	// `<project>#<id>` counts in any argument, flag values and message text included.
-	for (const word of words.slice(start)) {
+	for (const word of words.slice(at + 1)) {
 		for (const ref of projectRefsIn(word)) out.refs.push(`${ref.project}#${ref.id}`);
 	}
 }
@@ -397,30 +583,48 @@ function commitSegment(words: string[], state: { messages: string[]; stdin: bool
 	}
 }
 
-const HEREDOC = /(?<!<)<<(?!<)(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/g;
-
-/** Bodies of the here-documents in a command (`<<EOF`, `<<-'EOF'`, ...). */
-function heredocBodies(command: string): string[] {
-	const bodies: string[] = [];
-	for (const match of command.matchAll(HEREDOC)) {
-		const start = command.indexOf("\n", (match.index ?? 0) + match[0].length);
-		if (start === -1) continue;
-		const body: string[] = [];
-		for (const line of command.slice(start + 1).split("\n")) {
-			if ((match[1] ? line.replace(/^\t+/, "") : line) === match[3]) break;
-			body.push(line);
+/** Bodies of the here-documents inside `$(...)` and backtick substitutions of `segments`' words, at any depth. */
+function substitutionHeredocs(segments: string[][], out: string[]): void {
+	for (const words of segments) {
+		for (const word of words) {
+			for (let i = 0; i < word.length; i++) {
+				let inner: string;
+				if (word.startsWith("$(", i) && word[i + 2] !== "(") {
+					const end = balancedEnd(word, i + 1);
+					inner = word.slice(i + 2, word[end - 1] === ")" ? end - 1 : end);
+					i = end - 1;
+				} else if (word[i] === "`") {
+					const close = word.indexOf("`", i + 1);
+					inner = word.slice(i + 1, close === -1 ? word.length : close);
+					i = close === -1 ? word.length : close;
+				} else continue;
+				const scanned = scanCommand(inner);
+				out.push(...scanned.heredocs, ...scanned.hereStrings);
+				substitutionHeredocs([...scanned.segments, scanned.hereStrings], out);
+			}
 		}
-		bodies.push(body.join("\n"));
 	}
-	return bodies;
 }
 
 /**
  * Commit message text a bash command hands to `git commit`: `-m`/`--message` and `--trailer` values,
- * plus the command's here-document bodies when the message is read from stdin (`-F-`, `--file=-`).
+ * plus the command's here-document bodies and here-string words (also those inside command substitutions) when the message is read from stdin (`-F-`, `--file=-`).
  */
 export function gitCommitMessages(command: string): string[] {
 	const state = { messages: [] as string[], stdin: false };
-	for (const words of tokenizeCommand(command)) commitSegment(words, state);
-	return state.stdin ? [...state.messages, ...heredocBodies(command)] : state.messages;
+	const { segments, heredocs, hereStrings } = scanCommand(command);
+	for (const words of segments) commitSegment(words, state);
+	if (!state.stdin) return state.messages;
+	substitutionHeredocs([...segments, hereStrings], heredocs);
+	// A lone substitution whose inner command yields bodies feeds that output (scanned above), not its source text.
+	const literal = hereStrings.filter(text => {
+		const lone =
+			(text.startsWith("$(") && balancedEnd(text, 1) === text.length) ||
+			(text.startsWith("`") && text.indexOf("`", 1) === text.length - 1);
+		if (!lone) return true;
+		const inner: string[] = [];
+		substitutionHeredocs([[text]], inner);
+		return inner.length === 0;
+	});
+	return [...state.messages, ...heredocs, ...literal];
 }
