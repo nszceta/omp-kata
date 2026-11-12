@@ -86,6 +86,20 @@ describe("ShimHost root selection", () => {
 		expect(env).toEqual({ PATH: "/usr/bin" });
 	});
 
+	test("on win32 nothing is installed and the notice says identity is unavailable on Windows, once", () => {
+		const root = newRoot();
+		const env = { PATH: "/usr/bin" };
+		const host = newHost(env, { tmpRoot: root, platform: "win32" });
+
+		expect(() => host.install("/real/kata")).toThrow(ShimUnavailableError);
+		expect(() => host.install("/real/kata")).toThrow(ShimUnavailableError);
+
+		expect(env).toEqual({ PATH: "/usr/bin" });
+		expect(readdirSync(root)).toEqual([]);
+		expect(host.takeFailureNotice()).toContain("Windows");
+		expect(host.takeFailureNotice()).toBeUndefined();
+	});
+
 	test("the failure notice names every root tried and is handed out exactly once", () => {
 		const first = newRoot();
 		const second = newRoot();

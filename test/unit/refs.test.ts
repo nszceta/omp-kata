@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { RefGuard } from "../../src/guard";
 import {
 	gitCommitMessages,
 	isIssueRef,
@@ -63,7 +64,7 @@ describe("tokenizeCommand", () => {
 
 	test("here-document bodies are opaque and not segments; following commands still tokenize", () => {
 		expect(tokenizeCommand("cat > x.sh <<EOF\nkata claim wxyz\nEOF\nkata close abcd")).toEqual([
-			["cat", ">", "x.sh"],
+			["cat"],
 			["kata", "close", "abcd"],
 		]);
 		expect(tokenizeCommand("cat<<EOF;echo a\nbody; echo b\nEOF")).toEqual([["cat"], ["echo", "a"]]);
@@ -89,7 +90,7 @@ describe("tokenizeCommand", () => {
 	});
 
 	test("CRLF line endings still end the here-document", () => {
-		expect(tokenizeCommand("cat <<EOF > f\r\nx\r\nEOF\r\nkata claim abcd")).toEqual([["cat", ">", "f"], ["kata", "claim", "abcd"]]);
+		expect(tokenizeCommand("cat <<EOF > f\r\nx\r\nEOF\r\nkata claim abcd")).toEqual([["cat"], ["kata", "claim", "abcd"]]);
 	});
 
 	test("<< inside bare arithmetic is a shift, not a here-document", () => {
@@ -462,5 +463,65 @@ describe("shell keywords and prefix options before kata", () => {
 	});
 	test("git commit after if", () => {
 		expect(gitCommitMessages('if git commit -m "hello"; then echo; fi')).toEqual(["hello"]);
+	});
+});
+
+describe("redirections", () => {
+	const cases: [string, string[][]][] = [
+		["kata claim abcd >> notes", [["kata", "claim", "abcd"]]],
+		["kata claim abcd 2>&1 | tee output", [["kata", "claim", "abcd"], ["tee", "output"]]],
+		["kata close abcd --done >/dev/null", [["kata", "close", "abcd", "--done"]]],
+		["kata claim abcd &> log", [["kata", "claim", "abcd"]]],
+		["kata claim abcd < input", [["kata", "claim", "abcd"]]],
+		["kata claim >log abcd", [["kata", "claim", "abcd"]]],
+		["echo x >&2; kata close abcd --done", [["echo", "x"], ["kata", "close", "abcd", "--done"]]],
+		["git commit -m msg 2>/dev/null", [["git", "commit", "-m", "msg"]]],
+		["echo abc2>x", [["echo", "abc2"]]],
+		["cat <(ls) >| out", [["cat", "<"], ["ls"]]],
+	];
+	for (const [cmd, expected] of cases) {
+		test(cmd, () => expect(tokenizeCommand(cmd)).toEqual(expected));
+	}
+});
+
+describe("attention and ref guard agree on claim refs", () => {
+	const cases: [string, string[]][] = [
+		["kata claim abcd foo-bar efgh", ["abcd"]],
+		["kata claim abcd FOO efgh", ["abcd"]],
+		["kata claim abcd efgh", ["abcd", "efgh"]],
+		["kata claim abcd --force efgh", ["abcd"]],
+		["kata claim --if-unowned abcd efgh --agent", ["abcd", "efgh"]],
+		["kata claim --comment hello abcd", ["abcd"]],
+		["kata claim abcd --project p efgh", ["abcd"]],
+		["kata --project p claim abcd efgh", ["abcd", "efgh"]],
+		["kata --as bot --workspace /w claim abcd foo-bar efgh", ["abcd"]],
+		["kata claim p#abcd q#efgh", ["p#abcd", "q#efgh"]],
+		["kata claim foo abcd", ["abcd"]],
+	];
+	test.each(cases)("%s", (command, expected) => {
+		expect(parseRefEvents(command).filter(e => e.action === "claim").map(e => e.ref)).toEqual(expected);
+		expect(kataMentions(command).refs).toEqual(expected);
+	});
+});
+
+describe("flag values after a hidden or leading ref are not refs", () => {
+	const cases: [string, string[]][] = [
+		['kata wait "$A" "$B" --until closed --timeout 2h', []],
+		["kata wait $ID --until reply --timeout 30m", []],
+		["kata wait $(cat ids) --until stuck", []],
+		["kata wait ${IDS[@]} --until attention --any", []],
+		["kata wait $ID --timeout 1h30m", []],
+		["kata claim $ID --comment starting work", []],
+		["kata wait --until closed abcd", ["abcd"]],
+		["kata wait abcd efgh --until closed --poll-interval 5s", ["abcd", "efgh"]],
+	];
+	test.each(cases)("%s", (command, expected) => {
+		expect(kataMentions(command).refs).toEqual(expected);
+	});
+
+	test("a later write containing a wait condition is not blocked", () => {
+		const guard = new RefGuard("/ws", undefined, ["kata"]);
+		guard.observeCommand("kata wait $ID --until closed --timeout 2h");
+		expect(guard.find("the issue is closed now")).toBeUndefined();
 	});
 });
