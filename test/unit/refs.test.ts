@@ -313,3 +313,51 @@ describe("gitCommitMessages", () => {
 		expect(message).toContain("subject q7x2");
 	});
 });
+
+describe("shell keywords and prefix options before kata", () => {
+	const claims = [
+		"if kata claim abcd; then echo ok; fi",
+		"while true; do kata claim abcd; done",
+		"if x; then :; else kata claim abcd; fi",
+		"! kata claim abcd",
+		"time -p kata claim abcd",
+		"env -u FOO kata claim abcd",
+		"env -i PATH=/usr/bin kata claim abcd",
+		"env --unset=FOO -C /tmp -- kata claim abcd",
+		"exec -a name kata claim abcd",
+		"command -p kata claim abcd",
+	];
+	for (const c of claims) {
+		test(c, () => {
+			expect(parseRefEvents(c)).toEqual([{ action: "claim", ref: "abcd" }]);
+			expect(kataMentions(c).refs).toEqual(["abcd"]);
+		});
+	}
+	for (const c of ["while true; do kata close abcd --done; done", "! kata close abcd --done"]) {
+		test(c, () => {
+			expect(parseRefEvents(c)).toEqual([{ action: "close", ref: "abcd" }]);
+			expect(kataMentions(c).refs).toEqual(["abcd"]);
+		});
+	}
+	test("command -v/-V/-pv/-pV are lookups", () => {
+		for (const c of ["command -v kata", "command -V kata claim abcd", "command -pv kata claim abcd", "command -pV kata claim abcd"]) {
+			expect(parseRefEvents(c)).toEqual([]);
+			expect(kataMentions(c).refs).toEqual([]);
+		}
+	});
+	test("env split-string runs another command", () => {
+		for (const c of [
+			"env -S echo kata claim abcd",
+			"env -Secho kata claim abcd",
+			"env --split-string=echo kata claim abcd",
+			"env --split-string echo kata claim abcd",
+			"env -S python3 kata claim abcd",
+		]) {
+			expect(parseRefEvents(c)).toEqual([]);
+		}
+		expect(gitCommitMessages("env -S echo git commit -m bogus")).toEqual([]);
+	});
+	test("git commit after if", () => {
+		expect(gitCommitMessages('if git commit -m "hello"; then echo; fi')).toEqual(["hello"]);
+	});
+});

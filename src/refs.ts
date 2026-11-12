@@ -144,13 +144,40 @@ function basename(token: string): string {
 	return slash === -1 ? token : token.slice(slash + 1);
 }
 
-/** Index of the executable word in a segment if its basename is in `names`, skipping leading `VAR=x`, `env`, `command`, ... words. */
+const RESERVED_PREFIX = new Set(["if", "then", "elif", "else", "do", "while", "until", "!", "{"]);
+/** Options of prefix commands that consume the next word; short flags match exactly, long flags only without `=`. */
+const PREFIX_VALUE_OPTIONS: Record<string, ReadonlySet<string>> = {
+	env: new Set(["-u", "--unset", "-C", "--chdir"]),
+	exec: new Set(["-a"]),
+};
+
+/** Index of the executable word in a segment if its basename is in `names`, skipping leading `VAR=x`, reserved words, and prefix commands with their options. */
 function findCommandWord(words: string[], names: ReadonlySet<string>): number {
+	let prefix: string | undefined;
 	for (let i = 0; i < words.length; i++) {
 		const word = words[i] as string;
-		const bare = word.replace(/^[({]+/, "");
-		if (bare === "" || ASSIGNMENT.test(bare) || Object.hasOwn(PREFIX_COMMANDS, bare)) continue;
-		return names.has(basename(bare)) ? i : -1;
+		const bare = prefix === undefined ? word.replace(/^[({]+/, "") : word;
+		if (bare === "" || ASSIGNMENT.test(bare)) continue;
+		if (prefix === undefined) {
+			if (RESERVED_PREFIX.has(bare)) continue;
+			if (Object.hasOwn(PREFIX_COMMANDS, bare)) {
+				prefix = bare;
+				continue;
+			}
+			return names.has(basename(bare)) ? i : -1;
+		}
+		if (word === "--") {
+			prefix = undefined;
+			continue;
+		}
+		if (word.startsWith("-") && word.length > 1) {
+			if (prefix === "env" && /^(?:-[0iv]*S|--split-string(?:=|$))/.test(word)) return -1;
+			if (prefix === "command" && /^-[pvV]*[vV]/.test(word)) return -1;
+			if (PREFIX_VALUE_OPTIONS[prefix]?.has(word)) i++;
+			continue;
+		}
+		prefix = undefined;
+		i--;
 	}
 	return -1;
 }
