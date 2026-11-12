@@ -88,6 +88,8 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 		};
 
 		const warnShim = (ctx: ExtensionContext, rt: KataRuntime): void => {
+			// Subagent sessions have no UI and would consume the process-wide one-time notice for nothing.
+			if (!ctx.hasUI) return;
 			const warning = rt.takeShimWarning();
 			if (warning !== undefined) ctx.ui.notify(warning, "warning");
 		};

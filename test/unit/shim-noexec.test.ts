@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { ShimHost, ShimUnavailableError } from "../../src/shim";
 import { bashCall, loadExtension, tempDir } from "./helpers";
@@ -111,6 +111,45 @@ describe("ShimHost root selection", () => {
 		expect(stateDir.startsWith(`${runtime}/omp-kata-`)).toBe(true);
 	});
 
+	test("a runtime dir open to group or others is skipped for the OS temp dir", () => {
+		const runtime = newRoot();
+		const tmp = newRoot();
+		const original = process.env.TMPDIR;
+		process.env.TMPDIR = tmp;
+		try {
+			for (const mode of [0o770, 0o707, 0o755, 0o777]) {
+				chmodSync(runtime, mode);
+				const host = newHost({ PATH: "/usr/bin", XDG_RUNTIME_DIR: runtime }, {});
+				expect(host.install("/real/kata").startsWith(`${tmp}/`)).toBe(true);
+				expect(readdirSync(runtime)).toEqual([]);
+				host.dispose();
+			}
+		} finally {
+			if (original === undefined) delete process.env.TMPDIR;
+			else process.env.TMPDIR = original;
+		}
+	});
+
+	test("a symlinked or missing runtime dir is skipped for the OS temp dir", () => {
+		const real = newRoot();
+		const tmp = newRoot();
+		const link = join(tmp, "run-link");
+		symlinkSync(real, link);
+		const original = process.env.TMPDIR;
+		process.env.TMPDIR = tmp;
+		try {
+			for (const runtime of [link, join(tmp, "missing")]) {
+				const host = newHost({ PATH: "/usr/bin", XDG_RUNTIME_DIR: runtime }, {});
+				expect(host.install("/real/kata").startsWith(`${tmp}/omp-kata-`)).toBe(true);
+				host.dispose();
+			}
+			expect(readdirSync(real)).toEqual([]);
+		} finally {
+			if (original === undefined) delete process.env.TMPDIR;
+			else process.env.TMPDIR = original;
+		}
+	});
+
 	test("a relative XDG_RUNTIME_DIR is ignored", () => {
 		const host = newHost({ PATH: "/usr/bin", XDG_RUNTIME_DIR: "relative/run" }, {});
 
@@ -134,6 +173,28 @@ describe("identity disabled warning in a session", () => {
 	});
 	afterEach(() => rig.dispose());
 
+	test("a session without a UI hitting the failure does not consume the warning", async () => {
+		const root = tempDir("omp-kata-noexec-");
+		const shim = new ShimHost({ PATH: process.env.PATH }, { tmpRoot: root, canExecute: () => false });
+		try {
+			const deps = { env: rig.env(), loadSettings: async () => ({}), now: () => rig.time, hostPid: HOST_PID, shim };
+			const sub = await loadExtension(deps);
+			const subCtx = rig.session({ hasUI: false });
+			await sub.emit("session_start", {}, subCtx);
+			await prompt(sub, subCtx);
+			expect(subCtx.notifications).toEqual([]);
+
+			const main = await loadExtension(deps);
+			const mainCtx = rig.session({ hasUI: true });
+			await main.emit("session_start", {}, mainCtx);
+			await prompt(main, mainCtx);
+			expect(mainCtx.notifications.filter(n => n.level === "warning" && n.message.includes("identity disabled"))).toHaveLength(1);
+		} finally {
+			shim.dispose();
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	test("one warning in total across prompts and bash calls, and commands still run", async () => {
 		const root = tempDir("omp-kata-noexec-");
 		const env: Record<string, string | undefined> = { PATH: process.env.PATH };
@@ -146,7 +207,7 @@ describe("identity disabled warning in a session", () => {
 				hostPid: HOST_PID,
 				shim,
 			});
-			const ctx = rig.session();
+			const ctx = rig.session({ hasUI: true });
 			await host.emit("session_start", {}, ctx);
 			await prompt(host, ctx);
 			expect(await host.emitOne("tool_call", bashCall("kata list"), ctx)).toBeUndefined();

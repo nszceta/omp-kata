@@ -118,10 +118,25 @@ function canExecute(path: string): boolean {
 	}
 }
 
+/**
+ * True for an absolute path that is a real directory (not a symlink) owned by this user and closed to
+ * group and others. Anything else (for example a user's runtime dir inherited by `sudo -E`) could let
+ * another account swap our state dir for its own, so it is not trusted to hold a shim we will run.
+ */
+function isPrivateOwnDir(path: string): boolean {
+	if (!isAbsolute(path)) return false;
+	try {
+		const stat = lstatSync(path);
+		return stat.isDirectory() && stat.uid === process.getuid?.() && (stat.mode & 0o077) === 0;
+	} catch {
+		return false;
+	}
+}
+
 export interface ShimHostOptions {
 	/**
 	 * Candidate roots for the state dir, tried in order. A single path or a list; default
-	 * `$XDG_RUNTIME_DIR` (per-user, 0700, normally exec-allowed) then the OS temp dir.
+	 * `$XDG_RUNTIME_DIR` (when a private directory of this user; normally exec-allowed) then the OS temp dir.
 	 */
 	tmpRoot?: string | readonly string[];
 	/** Shim script to copy; default: the package's bin/kata. */
@@ -167,7 +182,7 @@ export class ShimHost {
 		const configured = this.options.tmpRoot;
 		if (configured !== undefined) return typeof configured === "string" ? [configured] : configured;
 		const runtime = this.env.XDG_RUNTIME_DIR;
-		return runtime && isAbsolute(runtime) ? [runtime, tmpdir()] : [tmpdir()];
+		return runtime && isPrivateOwnDir(runtime) ? [runtime, tmpdir()] : [tmpdir()];
 	}
 
 	/** Creates the state dir and shim in `root`; removes the dir again and throws when the shim cannot run there. */

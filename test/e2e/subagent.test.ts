@@ -116,19 +116,25 @@ describe("subagent identity", () => {
 		};
 		await withEnv({}, async env => {
 			const tmp = `${env.dir}/t`;
+			const run = `${env.dir}/run`;
 			mkdirSync(tmp, { recursive: true });
-			const res = await env.run(probe, "go", { env: { TMPDIR: tmp } });
+			mkdirSync(run, { recursive: true, mode: 0o700 });
+			const res = await env.run(probe, "go", { env: { TMPDIR: tmp, XDG_RUNTIME_DIR: run } });
 			expect(res.code).toBe(0);
-			expect(env.file("path1")).toMatch(new RegExp(`^${tmp}/omp-kata-[^/]+/bin$`));
+			expect(env.file("path1")).toMatch(new RegExp(`^${run}/omp-kata-[^/]+/bin$`));
 			expect(env.file("kata_path")).toBe(`${env.file("path1")}/kata`);
+			expect(readdirSync(run).filter(n => n.startsWith("omp-kata-"))).toEqual([]);
 			expect(readdirSync(tmp).filter(n => n.startsWith("omp-kata-"))).toEqual([]);
 		});
 		await withEnv({}, async env => {
 			const tmp = `${env.dir}/t`;
+			const run = `${env.dir}/run`;
 			mkdirSync(tmp, { recursive: true });
-			const res = await env.run(probe, "go", { env: { TMPDIR: tmp, OMP_KATA_IDENTITY: "false" } });
+			mkdirSync(run, { recursive: true, mode: 0o700 });
+			const res = await env.run(probe, "go", { env: { TMPDIR: tmp, XDG_RUNTIME_DIR: run, OMP_KATA_IDENTITY: "false" } });
 			expect(res.code).toBe(0);
 			expect(env.file("path1")).not.toContain("omp-kata-");
+			expect(readdirSync(run).filter(n => n.startsWith("omp-kata-"))).toEqual([]);
 			expect(readdirSync(tmp).filter(n => n.startsWith("omp-kata-"))).toEqual([]);
 		});
 	}, T);
