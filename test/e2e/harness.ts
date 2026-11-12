@@ -287,8 +287,8 @@ export async function withEnv<T>(opts: EnvOptions, fn: (env: E2EEnv) => Promise<
 
 export const T = 180_000;
 
-/** bash snippet: extract `.issue.short_id` from a kata create --json file into stdout */
-export const SHORT_ID = `grep -o '"short_id":"[^"]*"' | head -1 | cut -d'"' -f4`;
+/** bash snippet: read `kata ... --json` on stdin, print `.issue.short_id`; exits 1 with a stderr message when it is missing */
+export const SHORT_ID = `bun -e 'const id = JSON.parse(require("fs").readFileSync(0, "utf8"))?.issue?.short_id; if (typeof id !== "string" || id === "") { process.stderr.write("SHORT_ID: .issue.short_id missing\\n"); process.exit(1); } process.stdout.write(id);'`;
 
 /** system-prompt blocks that contain the contract tag */
 export function contractBlocks(req: RequestLog): string[] {
