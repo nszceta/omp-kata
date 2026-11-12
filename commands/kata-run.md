@@ -32,8 +32,8 @@ Rules for every branch of the run:
 4. Create the integration branch and ignore the worktree directory locally (this does not change any tracked file):
    ```
    git switch --no-track -c kata/<run>
-   grep -qxF '/.kata-worktrees/' "$(git rev-parse --git-common-dir)/info/exclude" \
-     || echo '/.kata-worktrees/' >> "$(git rev-parse --git-common-dir)/info/exclude"
+   exclude=$(git rev-parse --git-path info/exclude) && mkdir -p "$(dirname "$exclude")" \
+     && { grep -qxF '/.kata-worktrees/' "$exclude" 2>/dev/null || echo '/.kata-worktrees/' >> "$exclude"; }
    ```
 
 ## Loop
