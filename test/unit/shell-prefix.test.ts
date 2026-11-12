@@ -39,12 +39,22 @@ describe("composeShellPrefix in a real shell", () => {
 		cleanups.push(() => Bun.spawnSync(["rm", "-rf", dirname(decoy), shim]));
 	});
 
-	test("without any kata dir on PATH yet it is prepended; running twice in one shell never grows PATH", () => {
+	test("without the shim dir on PATH yet it is prepended; running again in one shell does not grow PATH", () => {
 		const shim = tempDir("omp-kata-shim-");
 		const prefix = composeShellPrefix(shim, undefined);
 		const out = runAsOmp(prefix, "/usr/bin:/bin", ['echo "$PATH"', 'echo "$PATH"', 'echo "$PATH"']);
 		expect(out).toEqual([`${shim}:/usr/bin:/bin`, `${shim}:/usr/bin:/bin`, `${shim}:/usr/bin:/bin`]);
 		cleanups.push(() => Bun.spawnSync(["rm", "-rf", shim]));
+	});
+
+	test("strips only a leading shim dir: after rc prepends, the shim is first and later copies stay", () => {
+		const prefix = composeShellPrefix("/S", undefined);
+		const step = `PATH=/rc:$PATH; ${prefix} :`;
+		for (const shell of ["bash", "sh"]) {
+			const script = `${step}\n${step}\n${step}\necho "$PATH"`;
+			const result = Bun.spawnSync([shell, "-c", script], { env: { PATH: "/S:/usr/bin:/bin", HOME: "/nonexistent" } });
+			expect(result.stdout.toString().trim()).toBe("/S:/rc:/S:/rc:/S:/rc:/S:/usr/bin:/bin");
+		}
 	});
 
 	test("works for shim dirs with spaces and quotes, in sh as well as bash", () => {
