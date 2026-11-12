@@ -87,13 +87,21 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 			watcher = { ctx, timer: ctx.setInterval(() => idleTick(ctx, rt), ms) };
 		};
 
+		const warnShim = (ctx: ExtensionContext, rt: KataRuntime): void => {
+			const warning = rt.takeShimWarning();
+			if (warning !== undefined) ctx.ui.notify(warning, "warning");
+		};
+
 		const beginSession = async (ctx: ExtensionContext, rt: KataRuntime | undefined): Promise<void> => {
 			if (!rt) {
 				updateStatus(ctx, undefined);
 				return;
 			}
 			startWatcher(ctx, rt);
-			void rt.syncIdentity(sessionId(ctx)).then(() => refreshStatus(ctx, rt));
+			void rt
+				.syncIdentity(sessionId(ctx))
+				.then(() => warnShim(ctx, rt))
+				.then(() => refreshStatus(ctx, rt));
 			await rt.startEnvRef(sessionId(ctx));
 			await refreshStatus(ctx, rt);
 		};
@@ -126,6 +134,7 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 				rt.syncIdentity(sessionId(ctx)),
 				rt.reconcileTracked(true),
 			]).then(([c, i]) => [c, i] as const);
+			warnShim(ctx, rt);
 			if (contract.failure !== undefined && !rt.contractWarned) {
 				rt.contractWarned = true;
 				ctx.ui.notify(`kata contract unavailable: ${contract.failure}`, "warning");
@@ -144,7 +153,10 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 		pi.on("tool_call", async (event, ctx) => {
 			const rt = await runtimeFor(ctx);
 			if (!rt) return undefined;
-			if (event.toolName === "bash") await rt.syncIdentity(sessionId(ctx));
+			if (event.toolName === "bash") {
+				await rt.syncIdentity(sessionId(ctx));
+				warnShim(ctx, rt);
+			}
 			// Tool inputs are plain JSON objects; the guard reads only the fields it knows per tool.
 			const reason = rt.guardToolCall(event.toolCallId, event.toolName, event.input as Record<string, unknown>, ctx.cwd);
 			return reason === undefined ? undefined : { block: true, reason };
