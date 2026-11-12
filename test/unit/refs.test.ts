@@ -75,6 +75,27 @@ describe("tokenizeCommand", () => {
 		]);
 	});
 
+	test("CRLF line endings still end the here-document", () => {
+		expect(tokenizeCommand("cat <<EOF > f\r\nx\r\nEOF\r\nkata claim abcd")).toEqual([["cat", ">", "f"], ["kata", "claim", "abcd"]]);
+	});
+
+	test("<< inside bare arithmetic is a shift, not a here-document", () => {
+		expect(tokenizeCommand("(( x << 1 ))\nkata claim abcd")).toEqual([["kata", "claim", "abcd"]]);
+		expect(tokenizeCommand("(( x <<= 1 ))\nkata claim abcd")).toEqual([["kata", "claim", "abcd"]]);
+		expect(tokenizeCommand("for (( i = 1; i < 9; i <<= 1 )); do echo $i; done\nkata claim abcd")).toEqual([
+			["for"],
+			["do", "echo", "$i"],
+			["done"],
+			["kata", "claim", "abcd"],
+		]);
+		expect(tokenizeCommand("echo $((1<<2))\nkata claim abcd")).toEqual([["echo", "$((1<<2))"], ["kata", "claim", "abcd"]]);
+	});
+
+	test("nested subshells written with a space are still commands", () => {
+		expect(tokenizeCommand("( (kata claim abcd) )")).toEqual([["kata", "claim", "abcd"]]);
+		expect(tokenizeCommand("((kata claim abcd); true)")).toEqual([["kata", "claim", "abcd"], ["true"]]);
+	});
+
 	test("empty and operator-only input yields no segments", () => {
 		expect(tokenizeCommand("")).toEqual([]);
 		expect(tokenizeCommand(" ; && | \n")).toEqual([]);
@@ -184,6 +205,13 @@ describe("claim parsing", () => {
 	test("kata commands written inside a here-document body are not claims", () => {
 		expect(parseRefEvents("cat > x.sh <<EOF\nkata claim wxyz\nEOF")).toEqual([]);
 		expect(parseRefEvents("cat <<'EOF' > x.sh\nkata close wxyz\nEOF\nkata claim abcd")).toEqual([{ action: "claim", ref: "abcd" }]);
+	});
+
+	test("CRLF input and arithmetic shifts do not hide later claims", () => {
+		expect(parseRefEvents("cat <<EOF > notes.txt\r\nhello\r\nEOF\r\nkata claim abcd")).toEqual([{ action: "claim", ref: "abcd" }]);
+		expect(parseRefEvents("(( x << 1 ))\nkata claim abcd")).toEqual([{ action: "claim", ref: "abcd" }]);
+		expect(parseRefEvents("for (( i = 1; i < 9; i <<= 1 )); do echo $i; done\nkata claim abcd")).toEqual([{ action: "claim", ref: "abcd" }]);
+		expect(parseRefEvents("( (kata claim abcd) )")).toEqual([{ action: "claim", ref: "abcd" }]);
 	});
 
 	test("other kata subcommands do not claim", () => {
@@ -351,6 +379,23 @@ describe("gitCommitMessages", () => {
 
 	test("every here-document body counts when the message comes from stdin", () => {
 		expect(gitCommitMessages("git commit -F - <<A <<B\none\nA\ntwo\nB")).toEqual(["one", "two"]);
+	});
+
+	test("CRLF input: the here-document ends at its delimiter line", () => {
+		expect(gitCommitMessages('cat <<EOF > f\r\nx\r\nEOF\r\ngit commit -m "fix kata#abcd"')).toEqual(["fix kata#abcd"]);
+		expect(gitCommitMessages("git commit -F - <<EOF\r\nsubject\r\nEOF\r\necho done")).toEqual(["subject\r"]);
+	});
+
+	test("arithmetic shifts do not swallow the following commit", () => {
+		expect(gitCommitMessages('(( x << 1 ))\ngit commit -m "fix kata#abcd"')).toEqual(["fix kata#abcd"]);
+	});
+
+	test("here-documents inside command substitutions count for stdin messages", () => {
+		expect(gitCommitMessages(`echo "$(cat <<'EOF'\nmsg kata#abcd\nEOF\n)" | git commit -F -`)).toEqual(["msg kata#abcd"]);
+		expect(gitCommitMessages(`git commit -F - <<< "$(cat <<'EOF'\nmsg kata#abcd\nEOF\n)"`)).toEqual(["msg kata#abcd"]);
+		expect(gitCommitMessages("echo `cat <<EOF\nmsg kata#abcd\nEOF\n` | git commit -F -")).toEqual(["msg kata#abcd"]);
+		expect(gitCommitMessages("echo $(echo $(cat <<EOF\ndeep\nEOF\n)) | git commit -F -")).toEqual(["deep"]);
+		expect(gitCommitMessages("echo $(cat <<EOF\nmsg\nEOF\n) | git commit -m x")).toEqual(["x"]);
 	});
 
 	test("a $(cat <<EOF ...) message keeps its body in the -m value", () => {

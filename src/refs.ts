@@ -50,6 +50,12 @@ function readDelimiter(command: string, from: number): { word: string; end: numb
 	return { word, end: Math.min(i, command.length) };
 }
 
+/** Whether the `((` at `open` closes with an adjacent `))`, i.e. is arithmetic rather than nested subshells. */
+function isArithmetic(command: string, open: number): boolean {
+	const inner = balancedEnd(command, open + 1);
+	return command[inner - 1] === ")" && command[inner] === ")" && balancedEnd(command, open) === inner + 1;
+}
+
 /** A command's simple-command segments plus the bodies of its here-documents, which are not commands. */
 export interface ScannedCommand {
 	segments: string[][];
@@ -144,12 +150,17 @@ export function scanCommand(command: string): ScannedCommand {
 					const eol = command.indexOf("\n", i);
 					const line = command.slice(i, eol === -1 ? command.length : eol);
 					i = eol === -1 ? command.length : eol + 1;
-					if ((strip ? line.replace(/^\t+/, "") : line) === delimiter) break;
+					const text = line.endsWith("\r") ? line.slice(0, -1) : line;
+					if ((strip ? text.replace(/^\t+/, "") : text) === delimiter) break;
 					body.push(line);
 				}
 				heredocs.push(body.join("\n"));
 			}
 			pending.length = 0;
+		} else if (ch === "(" && command[i + 1] === "(" && !inWord && isArithmetic(command, i)) {
+			// Bare `(( ... ))` / `for (( ... ))`: arithmetic, where `<<` is a shift rather than a here-document.
+			endSegment();
+			i = balancedEnd(command, i);
 		} else if (ch === ";" || ch === "|" || ch === "&" || ch === "(" || ch === ")") {
 			endSegment();
 			i++;
@@ -465,13 +476,38 @@ function commitSegment(words: string[], state: { messages: string[]; stdin: bool
 	}
 }
 
+/** Bodies of the here-documents inside `$(...)` and backtick substitutions of `segments`' words, at any depth. */
+function substitutionHeredocs(segments: string[][], out: string[]): void {
+	for (const words of segments) {
+		for (const word of words) {
+			for (let i = 0; i < word.length; i++) {
+				let inner: string;
+				if (word.startsWith("$(", i) && word[i + 2] !== "(") {
+					const end = balancedEnd(word, i + 1);
+					inner = word.slice(i + 2, word[end - 1] === ")" ? end - 1 : end);
+					i = end - 1;
+				} else if (word[i] === "`") {
+					const close = word.indexOf("`", i + 1);
+					inner = word.slice(i + 1, close === -1 ? word.length : close);
+					i = close === -1 ? word.length : close;
+				} else continue;
+				const scanned = scanCommand(inner);
+				out.push(...scanned.heredocs);
+				substitutionHeredocs(scanned.segments, out);
+			}
+		}
+	}
+}
+
 /**
  * Commit message text a bash command hands to `git commit`: `-m`/`--message` and `--trailer` values,
- * plus the command's here-document bodies when the message is read from stdin (`-F-`, `--file=-`).
+ * plus the command's here-document bodies (also those inside command substitutions) when the message is read from stdin (`-F-`, `--file=-`).
  */
 export function gitCommitMessages(command: string): string[] {
 	const state = { messages: [] as string[], stdin: false };
 	const { segments, heredocs } = scanCommand(command);
 	for (const words of segments) commitSegment(words, state);
-	return state.stdin ? [...state.messages, ...heredocs] : state.messages;
+	if (!state.stdin) return state.messages;
+	substitutionHeredocs(segments, heredocs);
+	return [...state.messages, ...heredocs];
 }
