@@ -313,3 +313,30 @@ describe("gitCommitMessages", () => {
 		expect(message).toContain("subject q7x2");
 	});
 });
+
+describe("shell keywords and prefix options before kata", () => {
+	const cases = [
+		"if kata claim abcd; then echo ok; fi",
+		"while true; do kata claim abcd; done",
+		"if x; then :; else kata claim abcd; fi",
+		"! kata claim abcd",
+		"time -p kata claim abcd",
+		"env -u FOO kata claim abcd",
+		"env -i PATH=/usr/bin kata claim abcd",
+		"env --unset=FOO -C /tmp -- kata claim abcd",
+		"exec -a name kata claim abcd",
+		"command -p kata claim abcd",
+	];
+	for (const c of cases) {
+		test(c, () => {
+			expect(parseRefEvents(c).map(e => e.action)).toEqual(["claim"]);
+		});
+	}
+	test("command -v is a lookup", () => {
+		expect(parseRefEvents("command -v kata")).toEqual([]);
+		expect(parseRefEvents("command -V kata claim abcd")).toEqual([]);
+	});
+	test("git commit after if", () => {
+		expect(gitCommitMessages('if git commit -m "hello"; then echo; fi')).toEqual(["hello"]);
+	});
+});
