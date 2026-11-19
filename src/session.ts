@@ -182,7 +182,10 @@ export class KataRuntime {
 		if (!this.settings.attention || this.agent.kind !== "main") return;
 		const ref = this.deps.env.KATA_REF;
 		if (!ref || ref.startsWith("-")) return;
+		const checkpoint = this.attention.checkpoint();
 		if (await this.attention.isClosed(ref)) return;
+		// the session may have ended while `show` ran
+		if (!this.attention.unchanged(checkpoint)) return;
 		await this.attention.start(ref, sessionId);
 	}
 

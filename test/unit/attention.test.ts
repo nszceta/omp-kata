@@ -77,12 +77,24 @@ describe("AttentionTracker (fake kata)", () => {
 			expect(fake.callsTo(START)).toHaveLength(1);
 		});
 
-		test("a failed start (exit 1) is reported but the ref stays tracked, since the claim happened", async () => {
+		test("a failed start (exit 1) is reported and never tracked", async () => {
 			fake.reply("agent-hook attention-native", { code: 1, stderr: "kata: native attention start: issue lookup unavailable" });
 			expect(await tracker.start("ab12", "sess-1")).toBe(false);
-			expect(tracker.has("ab12")).toBe(true);
-			expect(tracker.endAll()).toEqual(["ab12"]);
-			await waitFor(() => fake.callsTo(END).length === 1, 5000, "end for the ref whose start failed");
+			expect(tracker.has("ab12")).toBe(false);
+			expect(tracker.refs()).toEqual([]);
+			expect(tracker.endAll()).toEqual([]);
+			expect(fake.callsTo(END)).toHaveLength(0);
+		});
+
+		test("a start that resolves after endAll is not tracked and spawns no end", async () => {
+			fake.reply("agent-hook attention-native", { sleepMs: 400 });
+			const pending = tracker.start("ab12", "sess-1");
+			await waitFor(() => fake.callsTo(START).length === 1, 5000, "start call in flight");
+
+			expect(tracker.endAll()).toEqual([]);
+			expect(await pending).toBe(false);
+			expect(tracker.refs()).toEqual([]);
+			expect(fake.callsTo(END)).toHaveLength(0);
 		});
 	});
 
@@ -116,6 +128,23 @@ describe("AttentionTracker (fake kata)", () => {
 			expect(endRefs()).toEqual(["cd34"]);
 		});
 
+		test("project-qualified and short-id spellings address one tracked ref", async () => {
+			expect(await apply("kata claim ab12 cd34")).toBe(true);
+			expect(await apply(closeCommand("proj#ab12"))).toBe(true);
+			expect(tracker.has("ab12")).toBe(false);
+			expect(tracker.has("proj#ab12")).toBe(false);
+			expect(tracker.refs()).toEqual(["cd34"]);
+
+			expect(await apply("kata claim proj#ef56")).toBe(true);
+			expect(await apply(closeCommand("ef56"))).toBe(true);
+			expect(tracker.refs()).toEqual(["cd34"]);
+
+			// end repeats the spelling kata was given for the start
+			expect(await apply("kata claim proj#gh78")).toBe(true);
+			await endAndSettle(["cd34", "proj#gh78"]);
+			expect(endRefs().sort()).toEqual(["cd34", "proj#gh78"]);
+		});
+
 		test("claim then close in one command leaves nothing tracked and never ends the ref", async () => {
 			expect(await apply(`kata claim ab12 && ${closeCommand("ab12")}`)).toBe(true);
 			expect(fake.callsTo(START).map(refOf)).toEqual(["ab12"]);
@@ -130,6 +159,14 @@ describe("AttentionTracker (fake kata)", () => {
 		test("closing a ref that was never tracked changes nothing", async () => {
 			expect(await apply(closeCommand("ab12"))).toBe(false);
 			expect(tracker.refs()).toEqual([]);
+		});
+
+		test("a claim whose attention start fails is not tracked, even if the shell chain succeeds", async () => {
+			fake.reply("agent-hook attention-native", { code: 1, stderr: "kata: issue is owned by someone else" });
+			expect(await apply("kata claim ab12 || true")).toBe(false);
+			expect(tracker.refs()).toEqual([]);
+			expect(tracker.endAll()).toEqual([]);
+			expect(fake.callsTo(END)).toHaveLength(0);
 		});
 
 		test("--dry claim and --dry close are ignored", async () => {
