@@ -65,6 +65,21 @@ describe("stale state dir sweep", () => {
 		expect(existsSync(join(root, `omp-kata-${pid}-file01`))).toBe(true);
 	});
 
+	test("never follows symlinks inside a state dir", async () => {
+		const root = newRoot();
+		const target = populate(root, "precious");
+		writeFileSync(join(target, "kata"), "x");
+		const pid = await deadPid();
+		const dir = join(root, `omp-kata-${pid}-inner1`);
+		mkdirSync(dir, { mode: 0o700 });
+		symlinkSync(target, join(dir, "bin"));
+		symlinkSync(join(target, "s.env"), join(dir, "s.env"));
+		writeFileSync(join(dir, `s.env.${pid}.tmp`), "x");
+		expect(sweepStaleStateDirs(root)).toEqual([dir.slice(root.length + 1)]);
+		expect(existsSync(dir)).toBe(false);
+		for (const file of ["kata", "s.env", join("bin", "kata")]) expect(existsSync(join(target, file))).toBe(true);
+	});
+
 	test("leaves dirs with group/other permission bits or another owner alone", async () => {
 		const root = newRoot();
 		const pid = await deadPid();

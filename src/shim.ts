@@ -52,9 +52,15 @@ function unlinkIfLeaf(path: string): void {
  */
 function removeStateDirLayout(dir: string): boolean {
 	try {
-		unlinkIfLeaf(join(dir, "bin", "kata"));
+		const bin = join(dir, "bin");
 		try {
-			if (lstatSync(join(dir, "bin")).isDirectory()) rmdirSync(join(dir, "bin"));
+			// Descend only into a real directory: `bin/kata` through a symlinked `bin` would unlink outside the state dir.
+			if (lstatSync(bin).isDirectory()) {
+				unlinkIfLeaf(join(bin, "kata"));
+				rmdirSync(bin);
+			} else {
+				unlinkIfLeaf(bin);
+			}
 		} catch {
 			// missing or not empty
 		}
