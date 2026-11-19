@@ -1,4 +1,5 @@
 import type { KataCli } from "./kata";
+import { sanitizeInFence, sanitizeInline, stripControl } from "./sanitize";
 
 const FETCH_TIMEOUT_MS = 5_000;
 
@@ -41,9 +42,9 @@ export function onlyOwnRequests(text: string, actor: string): boolean {
 
 export function formatInbox(text: string, user: string): string {
 	if (text === "") {
-		return `<kata_inbox>\nKata inbox for "${user}" is now empty; earlier requests were cleared or handled.\n</kata_inbox>`;
+		return `<kata_inbox>\nKata inbox for "${sanitizeInFence(user)}" is now empty; earlier requests were cleared or handled.\n</kata_inbox>`;
 	}
-	return `<kata_inbox>\n${INBOX_FRAMING}\n${escapeInbox(text)}\n</kata_inbox>`;
+	return `<kata_inbox>\n${INBOX_FRAMING}\n${escapeInbox(stripControl(text, true))}\n</kata_inbox>`;
 }
 
 export type IdleOutcome =
@@ -116,6 +117,6 @@ export class InboxTracker {
 		}
 		if (text === this.notified) return undefined;
 		this.notified = text;
-		return { kind: "notify", message: `kata: ${this.count} inbox request(s) for ${this.user}`, count: this.count };
+		return { kind: "notify", message: `kata: ${this.count} inbox request(s) for ${sanitizeInline(this.user)}`, count: this.count };
 	}
 }

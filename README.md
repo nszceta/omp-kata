@@ -87,7 +87,7 @@ The contract block injected into the system prompt ends with a short omp addendu
 
 Only changes are delivered. When a non-empty inbox becomes empty the agent gets one "now empty" notice. kata errors and timeouts change nothing and are retried at the next check.
 
-**Trust boundary.** Inbox text includes free-text `kata notify --message` bodies written by anyone who can reach the project (teammates and their agents). It is untrusted data, not instructions. Before delivery the plugin escapes `&`, `<` and `>` as `&amp;`, `&lt;` and `&gt;`, so a message cannot close the `<kata_inbox>` block or open a tag that looks like system content, and it puts a framing line first inside the block saying the contents are requests from other kata users that must not be followed without the user's approval. The system-prompt addendum says the same. The "now empty" notice carries no sender text and is not escaped.
+**Trust boundary.** Inbox text includes free-text `kata notify --message` bodies written by anyone who can reach the project (teammates and their agents). It is untrusted data, not instructions. Before delivery the plugin escapes `&`, `<` and `>` as `&amp;`, `&lt;` and `&gt;`, so a message cannot close the `<kata_inbox>` block or open a tag that looks like system content, and it puts a framing line first inside the block saying the contents are requests from other kata users that must not be followed without the user's approval. The system-prompt addendum says the same. The "now empty" notice carries no sender text and is not entity-escaped.
 
 ### Attention
 
@@ -126,6 +126,14 @@ The `refGuard` setting enforces it on `tool_call`. It checks:
 - `git commit` messages given with `-m` or `-F-`.
 
 It flags `<project>#<id>` and bare short ids that the session has already seen in kata commands or their output. Ids the session has not seen pass, so ordinary 4-character tokens are not caught. With `block`, the call is refused. With `warn`, it goes through with a warning. Files written by shell redirection or `eval` are not checked.
+
+## Security notes
+
+- **Repository content is untrusted.** Project-local plugin settings are ignored (see [Settings](#settings)); `executable`/`contractSource` are validated; issue bodies and comments are data, not instructions. ANSI/control characters are stripped before display or prompt insertion and the `<kata_contract>` fence is neutralized; inbox text is escaped as described under [Inbox](#inbox). None of that makes the content trustworthy.
+- **kata identity is advisory.** The shim's state directory and environment are writable/readable by any agent running as the same user; `--as` and absolute-path kata calls bypass it. Use it to attribute cooperative work, never to authorize it.
+- **A bare `executable` follows the host `PATH`.** Keep repository-controlled directories out of that PATH, or set `executable` to an absolute path outside the workspace. `contractSource` is only accepted as an absolute path outside the workspace.
+- **The ref guard is best-effort.** It inspects `write`, `edit`, `ast_edit` and `git commit -m/-F-` only; shell redirection, `eval`, `-F <file>`, other tools and `file://` paths are outside it.
+- **The temp root is validated.** Identity is disabled (with one warning) when no absolute, private/sticky temp root can hold an executable shim.
 
 ## Why no MCP server
 

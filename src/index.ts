@@ -3,6 +3,7 @@ import { type Env, resolveSettings, type SettingsLoader } from "./config";
 import { registerKataCommand } from "./commands";
 import { KataRuntime, type RuntimeDeps } from "./session";
 import { type ShimHost, sharedShimHost } from "./shim";
+import { sanitizeInline } from "./sanitize";
 import { updateStatus } from "./status";
 import { findWorkspaceRoot } from "./workspace";
 import type { AgentIdentity } from "./identity";
@@ -91,7 +92,7 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 			// Subagent sessions have no UI and would consume the process-wide one-time notice for nothing.
 			if (!ctx.hasUI) return;
 			const warning = rt.takeShimWarning();
-			if (warning !== undefined) ctx.ui.notify(warning, "warning");
+			if (warning !== undefined) ctx.ui.notify(sanitizeInline(warning), "warning");
 		};
 
 		const beginSession = async (ctx: ExtensionContext, rt: KataRuntime | undefined): Promise<void> => {
