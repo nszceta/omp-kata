@@ -142,6 +142,10 @@ bun test test/unit     # hand-rolled fake ExtensionAPI + a fake `kata` script + 
 bun test test/e2e      # real omp binary + real kata + a scripted fake model provider (no network, no API keys)
 ```
 
+`bunfig.toml` omits optional/peer packages (omp's local embedding/ONNX stack) because this plugin and its tests never load them; run `bun install --config="$(mktemp)"` for a full install with them.
+
 All tests run with a private `HOME`, `PI_CODING_AGENT_DIR` and `KATA_HOME` and stop the kata daemon they start; nothing touches `~/.omp` or your real kata data. Environment overrides: `KATA_BIN` (kata binary), `OMP_BIN` (omp binary).
+
+`bun.lock` is the Bun 1.4.x text lockfile (`lockfileVersion: 2`) and must be regenerated with the same Bun line the project is built with — a lockfile written by a different Bun line is rejected with `Unknown lockfile version` and then silently ignored.
 
 Layout: `src/index.ts` (event wiring) · `session.ts` (per-session behavior) · `config.ts` · `kata.ts` (process runner) · `shim.ts` + `bin/kata` (identity delivery) · `workspace.ts` · `identity.ts` · `contract.ts` · `inbox.ts` · `attention.ts` · `refs.ts` (claim/close parser) · `status.ts` · `commands.ts` · `skills/kata/SKILL.md` · `commands/kata-run.md`.
