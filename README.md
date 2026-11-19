@@ -123,9 +123,9 @@ The `refGuard` setting enforces it on `tool_call`. It checks:
 
 - `write` content and `edit` `+` lines for files in the workspace;
 - `ast_edit` replacement text for paths in the workspace;
-- `git commit` messages given with `-m` or `-F-`.
+- `git commit` messages given with `-m` or `-F-` (`-F <file>` and merge/tag/notes messages are not read).
 
-It flags `<project>#<id>` and bare short ids that the session has already seen in kata commands or their output. Ids the session has not seen pass, so ordinary 4-character tokens are not caught. With `block`, the call is refused. With `warn`, it goes through with a warning. Files written by shell redirection or `eval` are not checked.
+It flags `<project>#<id>` and bare short ids that the session has already seen in kata commands or their output. Ids the session has not seen pass, so ordinary 4-character tokens are not caught. With `block`, the call is refused. With `warn`, it goes through with a warning. Files written by shell redirection, `eval`, other file-mutating tools or a `file://` path are not checked: this guard is hygiene, not a security boundary.
 
 ## Security notes
 

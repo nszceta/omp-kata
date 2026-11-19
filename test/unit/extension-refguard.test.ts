@@ -67,6 +67,24 @@ describe("write", () => {
 		}
 	});
 
+	test("human rows are learned only in kata's shapes; a column-0 word is never an id", async () => {
+		await bash(
+			"kata list",
+			"○ vcnn        Alpha widget (unowned)\n✓ 5yfq        Closed widget (unowned)\nmain   PASS\nStatus: ○ open  ● blocked  ✓ closed",
+		);
+		expect(await write("notes.md", "see vcnn")).toEqual({ block: true, reason: reasonFor("vcnn", "notes.md") });
+		expect(await write("notes.md", "see 5yfq")).toEqual({ block: true, reason: reasonFor("5yfq", "notes.md") });
+		expect(await write("notes.md", "main   PASS")).toBeUndefined();
+
+		// `kata search` rows lead with the id, but carry its score column
+		await bash("kata search widget", "w117      0.00  open      First issue  (title)");
+		expect(await write("notes.md", "see w117")).toEqual({ block: true, reason: reasonFor("w117", "notes.md") });
+
+		// `kata create` prints `<id> <title> [status]`; the status bracket is the anchor
+		await bash('kata create "New widget" --force-new', "17ts New widget [open]");
+		expect(await write("notes.md", "see 17ts")).toEqual({ block: true, reason: reasonFor("17ts", "notes.md") });
+	});
+
 	test("output of non-listing commands and of failed calls teaches nothing", async () => {
 		await bash("echo hi", '{"short_id":"m3k9"}');
 		await host.emit(

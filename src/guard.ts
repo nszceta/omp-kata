@@ -22,12 +22,23 @@ export function refFindingReason(finding: RefFinding): string {
 /** Subcommands whose output names issues the agent now knows about. */
 const LISTING_SUBCOMMANDS: Record<string, true> = { claim: true, show: true, create: true, next: true, list: true, search: true };
 
-/** Issue ids in kata output: JSON `short_id`, agent `issue=<id>` and `OK <cmd> <id>` / `Issue: <id>` lines, human `<id>  title` rows. */
+/**
+ * Issue ids in kata output: JSON `short_id`, `--agent` rows (`- issue=<id> score=... title=...`) and
+ * `OK <cmd> <id>` / `Issue: <id>` lines, plus human rows in the shapes kata actually prints:
+ *   - `list`/`ready`/`next`: `<status glyph> <id>  <title>` (`○` open, `●` blocked, `✓` closed);
+ *   - `search`:              `<id>  <score>  <status>  <title>`;
+ *   - `create`/`show`:       `<id>  <title>  [<status>]`.
+ * The inbox's quoted `- issue="<id>" title=... from=... message=` rows come only from `kata inbox`, which is
+ * not a listing subcommand, so they are deliberately not matched. A column-0 English word followed by
+ * spaces (`main   PASS`) is not an id.
+ */
 const OUTPUT_ID_PATTERNS = [
 	/"short_id"\s*:\s*"([a-z0-9]{4,12})"/g,
 	/(?<![A-Za-z0-9_?&])issue=([a-z0-9]{4,12})(?![A-Za-z0-9_])/g,
 	/^(?:OK [a-z-]+|Issue:) ([a-z0-9]{4,12})(?=\s|$)/gm,
-	/^(?:[^\x00-\x7F]\s+)?([a-z0-9]{4,12}) {2,}\S/gm,
+	/^[○●✓]\s+([a-z0-9]{4,12}) {2,}\S/gm,
+	/^([a-z0-9]{4,12}) {2,}[0-9]+\.[0-9]+ {2,}\S/gm,
+	/^([a-z0-9]{4,12}) +[^\n]*?\[(?:open|closed|blocked)\](?=\s|$)/gm,
 ];
 
 const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
