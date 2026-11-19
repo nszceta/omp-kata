@@ -1,4 +1,4 @@
-import { accessSync, chmodSync, constants, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, type Stats, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -151,14 +151,63 @@ export function detachInheritedShim(env: Env): void {
 	}
 }
 
-/** True when the kernel lets this process execute `path`: false on a noexec mount (EACCES). */
+/**
+ * True when the kernel actually lets this process execute `path`. `access(X_OK)` only checks permission
+ * bits, not a `noexec` mount flag, so the probe runs the copied shim against a trivial executable.
+ */
 function canExecute(path: string): boolean {
 	try {
-		accessSync(path, constants.X_OK);
-		return true;
+		const result = Bun.spawnSync([path, "--version"], {
+			env: { ...process.env, OMP_KATA_REAL: process.execPath, OMP_KATA_STATE_DIR: "", PI_SESSION_ID: "" },
+			timeout: 2_000,
+		});
+		return result.exitCode === 0;
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * True for a directory only root or this user can write to (without a sticky bit), or a sticky directory
+ * owned by root/this user. Any other owner can rename entries inside it, so neither the state dir nor its
+ * parent may be one.
+ */
+function isTrustedDir(stat: Stats): boolean {
+	if ((stat.mode & 0o022) !== 0) return isStickyTrusted(stat.mode, stat.uid);
+	return stat.uid === 0 || stat.uid === process.getuid?.();
+}
+
+/**
+ * Canonical path of `path`'s target when it is a safe temp root, else undefined. The path is resolved
+ * exactly once and the resolved path is what callers must use: validating a symlink's target and then
+ * using the link would let the link's owner retarget it after the check.
+ */
+function canonicalTempRoot(path: string): string | undefined {
+	if (!isAbsolute(path)) return undefined;
+	try {
+		const real = realpathSync(path);
+		const stat = lstatSync(real);
+		if (!stat.isDirectory() || !isTrustedDir(stat)) return undefined;
+		const parent = dirname(real);
+		if (parent === real) return real;
+		// A private root inside a non-sticky parent owned by another account can be renamed by that account.
+		return isTrustedDir(lstatSync(realpathSync(parent))) ? real : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * True for an absolute real directory (or a symlink to one) that only root/we own or can write to,
+ * directly and in its parent. A relative or non-sticky shared root could let another account swap the
+ * state dir.
+ */
+export function isSafeTempRoot(path: string): boolean {
+	return canonicalTempRoot(path) !== undefined;
+}
+
+function isStickyTrusted(mode: number, uid: number): boolean {
+	return (mode & 0o1000) !== 0 && (uid === 0 || uid === process.getuid?.());
 }
 
 /**
@@ -210,6 +259,9 @@ export class ShimUnavailableError extends Error {
  * The state dir lives in the first candidate root where the copied shim is executable: PATH lookup
  * silently skips files on a noexec mount and would run the real kata, losing every identity.
  *
+ * Identity is attribution, not authorization: any agent running as the same user can rewrite the state
+ * dir or the selector variables.
+ *
  * `env` is the environment omp's bash tool inherits: process.env in production, a stand-in in tests.
  */
 export class ShimHost {
@@ -229,9 +281,19 @@ export class ShimHost {
 
 	private candidateRoots(): readonly string[] {
 		const configured = this.options.tmpRoot;
-		if (configured !== undefined) return typeof configured === "string" ? [configured] : configured;
-		const runtime = this.env.XDG_RUNTIME_DIR;
-		return runtime && isPrivateOwnDir(runtime) ? [runtime, tmpdir()] : [tmpdir()];
+		const roots =
+			configured !== undefined
+				? typeof configured === "string"
+					? [configured]
+					: configured
+				: this.env.XDG_RUNTIME_DIR && isPrivateOwnDir(this.env.XDG_RUNTIME_DIR)
+					? [this.env.XDG_RUNTIME_DIR, tmpdir()]
+					: [tmpdir()];
+		// The sweep and isPrivateOwnDir only cover dirs this plugin created; the temp ROOT comes from the
+		// environment (relative, a symlink, or shared), so it needs its own ownership check. Resolve it once
+		// here: createIn, the sweep and the PATH entry all then use the canonical directory, never a symlink a
+		// third party could retarget after validation.
+		return [...new Set(roots.map(canonicalTempRoot).filter((root): root is string => root !== undefined))];
 	}
 
 	/** Creates the state dir and shim in `root`; removes the dir again and throws when the shim cannot run there. */
