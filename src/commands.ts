@@ -46,7 +46,7 @@ export async function inboxReport(host: CommandHost, ctx: ExtensionCommandContex
 	if (!rt) return "kata: not a kata workspace";
 	const identity = await rt.identity();
 	if (!identity) return "kata: could not resolve the kata actor (kata whoami failed)";
-	const tracker = rt.inbox ?? new InboxTracker(rt.cli, rt.root, identity.inboxUser, rt.settings.inboxPollSeconds);
+	const tracker = rt.inbox ?? new InboxTracker(rt.cli, rt.root, identity.inboxUser, identity.actor, rt.settings.inboxPollSeconds);
 	const text = await tracker.fetch();
 	if (text === undefined) return `kata: could not read the inbox for ${identity.inboxUser}`;
 	return text === "" ? "kata inbox empty" : text;

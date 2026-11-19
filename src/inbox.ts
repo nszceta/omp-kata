@@ -8,19 +8,21 @@ export function countRequests(text: string): number {
 }
 
 const REQUEST_LINE =
-	/^- issue=(?:"(?:[^"\\]|\\.)*"|\S+) title="(?:[^"\\]|\\.)*" from="((?:[^"\\]|\\.)*)" message=/;
+	/^- issue=(?:"(?:[^"\\]|\\.)*"|\S+) title="(?:[^"\\]|\\.)*" from="((?:[^"\\]|\\.)*)"(?: teammate="(?:[^"\\]|\\.)*")? message=/;
 
 /**
  * True when the inbox holds at least one request and every request was sent by `actor` itself
- * (`actor` or `actor/<teammate>`: this session and its own subagents). A request line that does not
- * parse counts as foreign. Anyone able to run `kata notify` can write the other requests.
+ * (`from` is the actor only; a teammate is a separate field, so own subagents match too). A request
+ * line that does not parse counts as foreign, and so does a truncated inbox (the omitted requests
+ * are unseen). Anyone able to run `kata notify` can write the other requests.
  */
 export function onlyOwnRequests(text: string, actor: string): boolean {
+	if (/^\[\d+ request\(s\) omitted/m.test(text)) return false;
 	const lines = text.split("\n").filter(line => line.startsWith("- issue="));
 	if (lines.length === 0) return false;
 	return lines.every(line => {
 		const from = REQUEST_LINE.exec(line)?.[1];
-		return from !== undefined && (from === actor || from.startsWith(`${actor}/`));
+		return from !== undefined && from === actor;
 	});
 }
 
@@ -49,6 +51,7 @@ export class InboxTracker {
 		private readonly cli: KataCli,
 		private readonly root: string,
 		readonly user: string,
+		private readonly actor: string,
 		private readonly pollSeconds: number,
 	) {}
 
@@ -94,7 +97,7 @@ export class InboxTracker {
 		if (this.checking) return undefined;
 		const text = await this.fetch();
 		if (text === undefined || text === "" || text === this.delivered) return undefined;
-		if (wake && onlyOwnRequests(text, this.user.split("/")[0] ?? this.user)) {
+		if (wake && onlyOwnRequests(text, this.actor)) {
 			this.delivered = text;
 			return { kind: "wake", payload: formatInbox(text, this.user), count: this.count };
 		}
