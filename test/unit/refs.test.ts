@@ -428,6 +428,12 @@ describe("gitCommitMessages", () => {
 		expect(gitCommitMessages('(( x << 1 ))\ngit commit -m "fix kata#abcd"')).toEqual(["fix kata#abcd"]);
 	});
 
+	test("deeply nested command substitutions are bounded instead of overflowing the stack", () => {
+		const depth = 2_000;
+		const nested = `${"$(".repeat(depth)}echo x${")".repeat(depth)}`;
+		expect(() => gitCommitMessages(`git commit -F- <<< "${nested}"`)).not.toThrow();
+	});
+
 	test("here-documents inside command substitutions count for stdin messages", () => {
 		expect(gitCommitMessages(`echo "$(cat <<'EOF'\nmsg kata#abcd\nEOF\n)" | git commit -F -`)).toEqual(["msg kata#abcd"]);
 		expect(gitCommitMessages(`git commit -F - <<< "$(cat <<'EOF'\nmsg kata#abcd\nEOF\n)"`)).toEqual(["msg kata#abcd"]);
