@@ -301,7 +301,7 @@ describe("InboxTracker (fake kata)", () => {
 			expect(t.delivered).toBe("");
 			expect(await t.idlePoll(true)).toBeUndefined();
 			// the next prompt still carries it
-			expect(await t.check(0)).toBe(`<kata_inbox>\n${foreign}\n</kata_inbox>`);
+			expect(await t.check(0)).toBe(`<kata_inbox>\n${INBOX_FRAMING}\n${foreign}\n</kata_inbox>`);
 		});
 
 		test("notify: announces once per distinct text and does not mark it delivered", async () => {
