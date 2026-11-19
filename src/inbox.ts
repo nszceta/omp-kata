@@ -109,14 +109,19 @@ export class InboxTracker {
 	 */
 	async idlePoll(wake: boolean): Promise<IdleOutcome | undefined> {
 		if (this.checking) return undefined;
-		const text = await this.fetch();
-		if (text === undefined || text === "" || text === this.delivered) return undefined;
-		if (wake && onlyOwnRequests(text, this.actor)) {
-			this.delivered = text;
-			return { kind: "wake", payload: formatInbox(text, this.user), count: this.count };
+		this.checking = true;
+		try {
+			const text = await this.fetch();
+			if (text === undefined || text === "" || text === this.delivered) return undefined;
+			if (wake && onlyOwnRequests(text, this.actor)) {
+				this.delivered = text;
+				return { kind: "wake", payload: formatInbox(text, this.user), count: this.count };
+			}
+			if (text === this.notified) return undefined;
+			this.notified = text;
+			return { kind: "notify", message: `kata: ${this.count} inbox request(s) for ${sanitizeInline(this.user)}`, count: this.count };
+		} finally {
+			this.checking = false;
 		}
-		if (text === this.notified) return undefined;
-		this.notified = text;
-		return { kind: "notify", message: `kata: ${this.count} inbox request(s) for ${sanitizeInline(this.user)}`, count: this.count };
 	}
 }

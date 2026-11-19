@@ -55,7 +55,7 @@
       "wakeOnInbox": {
         "type": "boolean",
         "default": false,
-        "description": "An idle main session starts a turn when new inbox requests arrive (otherwise it only notifies)"
+        "description": "An idle main session starts a turn when new inbox requests arrive, but only if every request comes from this session's own actor (otherwise it only notifies)"
       },
       "attention": {
         "type": "boolean",
