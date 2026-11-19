@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { AttentionTracker } from "./attention";
-import { type Env, type KataSettings, resolveSettings, type SettingsLoader } from "./config";
+import { type Env, type KataSettings, resolveSettings, sanitizeSettings, type SettingsLoader } from "./config";
 import { type ContractResult, getContract, ompAddendum, withContract } from "./contract";
 import { type AgentIdentity, deriveIdentity, type Identity, lookupActor } from "./identity";
 import { RefGuard, refFindingReason } from "./guard";
@@ -66,7 +66,7 @@ export class KataRuntime {
 	static async create(cwd: string, agent: AgentIdentity, deps: RuntimeDeps): Promise<KataRuntime | undefined> {
 		const root = findWorkspaceRoot(cwd);
 		if (root === undefined) return undefined;
-		const settings = await resolveSettings(cwd, { env: deps.env, loader: deps.loadSettings });
+		const settings = sanitizeSettings(await resolveSettings(cwd, { env: deps.env, loader: deps.loadSettings }), root);
 		return new KataRuntime(root, settings, agent, deps);
 	}
 

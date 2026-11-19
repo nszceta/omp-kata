@@ -29,7 +29,7 @@
       "executable": {
         "type": "string",
         "default": "kata",
-        "description": "kata executable (name on PATH or absolute path)"
+        "description": "kata executable (name on PATH or absolute path outside the workspace; relative/in-workspace values fall back to kata)"
       },
       "contract": {
         "type": "boolean",
@@ -39,7 +39,7 @@
       "contractSource": {
         "type": "string",
         "default": "",
-        "description": "Passed as --source to `kata agent-contract-hook` when non-empty (replaces the built-in contract text)"
+        "description": "Passed as --source to `kata agent-contract-hook` when non-empty (replaces the built-in contract text; must be an absolute path outside the workspace)"
       },
       "inbox": {
         "type": "boolean",
@@ -50,7 +50,7 @@
         "type": "number",
         "default": 15,
         "min": 0,
-        "description": "Minimum seconds between mid-turn/idle inbox checks; 0 checks after every tool result"
+        "description": "Minimum seconds between mid-turn/idle inbox checks (capped at 86400); 0 checks after every tool result"
       },
       "wakeOnInbox": {
         "type": "boolean",

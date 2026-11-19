@@ -33,13 +33,15 @@ Requirements: omp ≥ 18.12 (Bun runtime) and `kata` ≥ 0.23 on `PATH` (or set 
 Resolution order per setting: environment variable `OMP_KATA_<NAME>` > plugin setting > default. An unparsable value falls through to the next source.
 Set plugin settings with `omp plugin config set omp-kata <key> <value>`. Settings are read at session start and again on `/new`, `/resume` and fork.
 
+Only **user-level** plugin settings are read. Project-local overrides (`<cwd>/.omp/plugin-overrides.json` and omp's other project config dirs) are deliberately ignored: they are repository content, and `executable`/`contractSource` would otherwise let a cloned repo choose a binary to run or a file to inject into the system prompt. For the same reason, `executable` must be a bare name on `PATH` or an absolute path outside the workspace and `contractSource` must be absolute and outside the workspace; relative or in-workspace values fall back to `kata`/the built-in contract.
+
 | setting | env var | type | default | meaning |
 |---|---|---|---|---|
-| `executable` | `OMP_KATA_EXECUTABLE` | string | `kata` | kata binary |
+| `executable` | `OMP_KATA_EXECUTABLE` | string | `kata` | kata binary; a bare name on `PATH` or an absolute path outside the workspace (relative/in-workspace values fall back to `kata`) |
 | `contract` | `OMP_KATA_CONTRACT` | boolean | `true` | inject the contract into the system prompt |
-| `contractSource` | `OMP_KATA_CONTRACT_SOURCE` | string | `""` | passed as `--source` to `kata agent-contract-hook` when non-empty (replaces the built-in text; relative paths are resolved by kata against the workspace root) |
+| `contractSource` | `OMP_KATA_CONTRACT_SOURCE` | string | `""` | passed as `--source` to `kata agent-contract-hook` when non-empty (replaces the built-in text; must be an absolute path outside the workspace, relative/in-workspace values are ignored) |
 | `inbox` | `OMP_KATA_INBOX` | boolean | `true` | inbox delivery |
-| `inboxPollSeconds` | `OMP_KATA_INBOX_POLL_SECONDS` | number ≥ 0 | `15` | minimum seconds between mid-turn checks; the idle watcher runs every `max(value, 5)` seconds; `0` checks after every tool result |
+| `inboxPollSeconds` | `OMP_KATA_INBOX_POLL_SECONDS` | number ≥ 0 | `15` | minimum seconds between mid-turn checks; the idle watcher runs every `max(value, 5)` seconds (capped at 86400); `0` checks after every tool result |
 | `wakeOnInbox` | `OMP_KATA_WAKE_ON_INBOX` | boolean | `false` | idle main session starts a turn when new requests arrive instead of only notifying. **Security:** a woken turn runs tools with no human present, and the request text is written by whoever ran `kata notify`. To limit this, a wake happens only when every request comes from this session's own actor (the `kata whoami` actor; teammates of that actor count); any request from another actor is only announced. The sender (`from=`) is as asserted to kata (`KATA_AUTHOR`/`--as`), not authenticated, so enable only where every user who can reach the kata daemon is trusted |
 | `attention` | `OMP_KATA_ATTENTION` | boolean | `true` | attention lifecycle |
 | `identity` | `OMP_KATA_IDENTITY` | boolean | `true` | per-agent kata identity via the `PATH` shim; `false` leaves kata completely untouched (the shim passes through) |
