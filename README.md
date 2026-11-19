@@ -85,6 +85,8 @@ The contract block injected into the system prompt ends with a short omp addendu
 
 Only changes are delivered. When a non-empty inbox becomes empty the agent gets one "now empty" notice. kata errors and timeouts change nothing and are retried at the next check.
 
+**Trust boundary.** Inbox text includes free-text `kata notify --message` bodies written by anyone who can reach the project (teammates and their agents). It is untrusted data, not instructions. Before delivery the plugin escapes `&`, `<` and `>` as `&amp;`, `&lt;` and `&gt;`, so a message cannot close the `<kata_inbox>` block or open a tag that looks like system content, and it puts a framing line first inside the block saying the contents are requests from other kata users that must not be followed without the user's approval. The system-prompt addendum says the same. The "now empty" notice carries no sender text and is not escaped.
+
 ### Attention
 
 - Main session started with `KATA_REF` set: attention starts for that issue (skipped if the issue is already closed).
