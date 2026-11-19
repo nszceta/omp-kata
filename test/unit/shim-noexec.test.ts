@@ -63,7 +63,8 @@ describe("ShimHost root selection", () => {
 		const second = newRoot();
 		// pid 2^22+ is above Linux's default pid_max, so these cannot belong to a live process.
 		const stale = "omp-kata-4194303-abcdef";
-		for (const root of [first, second]) mkdirSync(join(root, stale));
+		for (const root of [first, second]) mkdirSync(join(root, stale), { mode: 0o700 });
+		for (const root of [first, second]) chmodSync(join(root, stale), 0o700);
 		const host = newHost({ PATH: "/usr/bin" }, { tmpRoot: [first, second], canExecute: noexecUnder(first) });
 
 		host.install("/real/kata");

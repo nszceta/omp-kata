@@ -1,4 +1,4 @@
-import { accessSync, chmodSync, constants, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,12 +35,45 @@ function isProcessAlive(pid: number): boolean {
 	}
 }
 
+/** Unlinks a regular file or symlink itself (never followed); anything else is left in place. */
+function unlinkIfLeaf(path: string): void {
+	try {
+		const stat = lstatSync(path);
+		if (stat.isFile() || stat.isSymbolicLink()) unlinkSync(path);
+	} catch {
+		// already gone
+	}
+}
+
+/**
+ * Removes only the known layout of a state dir (bin/kata, bin, *.env, *.env.<pid>.tmp, then the dir) with
+ * non-recursive calls, so entries swapped in concurrently are never followed. Unexpected leftovers make
+ * rmdir fail and the dir stays. Returns whether the dir is gone.
+ */
+function removeStateDirLayout(dir: string): boolean {
+	try {
+		unlinkIfLeaf(join(dir, "bin", "kata"));
+		try {
+			if (lstatSync(join(dir, "bin")).isDirectory()) rmdirSync(join(dir, "bin"));
+		} catch {
+			// missing or not empty
+		}
+		for (const entry of readdirSync(dir)) {
+			if (/\.env$|\.env\.\d+\.tmp$/.test(entry)) unlinkIfLeaf(join(dir, entry));
+		}
+		rmdirSync(dir);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Removes `omp-kata-<pid>-XXXXXX` directories in `root` whose process is gone (crash, SIGKILL, SIGTERM:
  * the exit hook cannot run then). Live pids, our own pid and any other name are left alone.
  * Returns the removed directory names.
  */
-export function sweepStaleStateDirs(root: string): string[] {
+export function sweepStaleStateDirs(root: string, uid: number | undefined = process.getuid?.()): string[] {
 	const removed: string[] = [];
 	let names: string[];
 	try {
@@ -55,8 +88,10 @@ export function sweepStaleStateDirs(root: string): string[] {
 		if (pid === process.pid || isProcessAlive(pid)) continue;
 		const path = join(root, name);
 		try {
-			if (!lstatSync(path).isDirectory()) continue;
-			rmSync(path, { recursive: true, force: true });
+			const stat = lstatSync(path);
+			// Only directories we created: ours (uid) and private (0700). Anything else in a shared root is not ours.
+			if (!stat.isDirectory() || stat.uid !== uid || (stat.mode & 0o077) !== 0) continue;
+			if (!removeStateDirLayout(path)) continue;
 			removed.push(name);
 		} catch {
 			// not ours to remove (permissions) or already gone
