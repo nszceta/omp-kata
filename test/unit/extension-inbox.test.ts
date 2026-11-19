@@ -188,7 +188,7 @@ describe("idle inbox watcher", () => {
 		await host.emit("session_start", {}, ctx);
 		await ctx.tick();
 
-		rig.fake.reply("inbox", { stdout: `${INBOX_TEXT}\n- issue="zz99" title="Other" from="adam" message="also"` });
+		rig.fake.reply("inbox", { stdout: `${INBOX_TEXT}\n- issue="zz99" title="Other" from="fakeuser" message="also"` });
 		await ctx.tick();
 
 		expect(ctx.notifications.map(n => n.message)).toEqual([
@@ -209,6 +209,18 @@ describe("idle inbox watcher", () => {
 		expect(host.sent).toEqual([{ message: INBOX_MESSAGE, options: { triggerTurn: true } }]);
 		expect(ctx.notifications).toEqual([]);
 		expect(await prompt(host, ctx)).toBeUndefined();
+	});
+
+	test("wakeOnInbox=true only notifies for a request from another actor", async () => {
+		rig.fake.reply("inbox", { stdout: INBOX_TEXT.replace('from="fakeuser"', 'from="mallory"') });
+		const host = await rig.load({ ...NO_CONTRACT, OMP_KATA_WAKE_ON_INBOX: "1" });
+		const ctx = rig.session();
+		await host.emit("session_start", {}, ctx);
+
+		await ctx.tick();
+
+		expect(host.sent).toEqual([]);
+		expect(ctx.notifications).toHaveLength(1);
 	});
 
 	test("shutdown clears the interval", async () => {
