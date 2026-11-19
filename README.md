@@ -158,4 +158,4 @@ All tests run with a private `HOME`, `PI_CODING_AGENT_DIR` and `KATA_HOME` and s
 
 `bun.lock` is the Bun 1.4.x text lockfile (`lockfileVersion: 2`) and must be regenerated with the same Bun line the project is built with — a lockfile written by a different Bun line is rejected with `Unknown lockfile version` and then silently ignored.
 
-Layout: `src/index.ts` (event wiring) · `session.ts` (per-session behavior) · `config.ts` · `kata.ts` (process runner) · `shim.ts` + `bin/kata` (identity delivery) · `workspace.ts` · `identity.ts` · `contract.ts` · `inbox.ts` · `attention.ts` · `refs.ts` (claim/close parser) · `status.ts` · `commands.ts` · `skills/kata/SKILL.md` · `commands/kata-run.md`.
+Layout: `src/index.ts` (event wiring) · `session.ts` (per-session behavior) · `config.ts` · `kata.ts` (process runner) · `shim.ts` + `bin/kata` (identity delivery) · `workspace.ts` · `identity.ts` · `contract.ts` · `inbox.ts` · `attention.ts` · `refs.ts` (claim/close parser) · `guard.ts` (ref hygiene on tool calls) · `sanitize.ts` (control stripping and contract-fence neutralization) · `json.ts` · `status.ts` · `commands.ts` · `skills/kata/SKILL.md` · `commands/kata-run.md`.

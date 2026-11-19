@@ -11,10 +11,10 @@ export const CONTRACT_CLOSE = "</kata_contract>";
 
 const FETCH_TIMEOUT_MS = 10_000;
 
-const cache = new Map<string, Promise<ContractResult>>();
+const cache = new Map<string, Map<string, Promise<ContractResult>>>();
 
-function cacheKey(cli: KataCli, source: string, root: string): string {
-	return `${cli.executable}\0${source}\0${root}`;
+function cacheKey(cli: KataCli, source: string): string {
+	return `${cli.executable}\0${source}`;
 }
 
 async function fetchContract(cli: KataCli, source: string, root: string): Promise<ContractResult> {
@@ -34,13 +34,21 @@ async function fetchContract(cli: KataCli, source: string, root: string): Promis
 
 /** Fetches the contract through `kata agent-contract-hook`; successes are cached per (executable, source, root). */
 export function getContract(cli: KataCli, settings: Pick<KataSettings, "contractSource">, root: string): Promise<ContractResult> {
-	const key = cacheKey(cli, settings.contractSource, root);
-	const hit = cache.get(key);
+	const key = cacheKey(cli, settings.contractSource);
+	let scoped = cache.get(root);
+	const hit = scoped?.get(key);
 	if (hit) return hit;
 	const pending = fetchContract(cli, settings.contractSource, root);
-	cache.set(key, pending);
+	if (!scoped) {
+		scoped = new Map();
+		cache.set(root, scoped);
+	}
+	scoped.set(key, pending);
 	void pending.then(result => {
-		if (!result.ok && cache.get(key) === pending) cache.delete(key);
+		if (!result.ok && cache.get(root)?.get(key) === pending) {
+			scoped?.delete(key);
+			if (scoped?.size === 0) cache.delete(root);
+		}
 	});
 	return pending;
 }
@@ -50,9 +58,7 @@ export function clearContractCache(root?: string): void {
 		cache.clear();
 		return;
 	}
-	for (const key of [...cache.keys()]) {
-		if (key.split("\0")[2] === root) cache.delete(key);
-	}
+	cache.delete(root);
 }
 
 /**

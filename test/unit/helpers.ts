@@ -107,7 +107,7 @@ export async function waitFor(predicate: () => boolean, timeoutMs = 5000, what =
 	}
 }
 
-export interface KataResult {
+interface KataResult {
 	code: number;
 	stdout: string;
 	stderr: string;
@@ -176,14 +176,11 @@ export class RealKata {
 	}
 }
 
-export type Handler = (event: Record<string, unknown>, ctx: ExtensionContext) => unknown;
+type Handler = (event: Record<string, unknown>, ctx: ExtensionContext) => unknown;
 
 export interface PromptResult {
 	systemPrompt?: string[];
 	message?: { customType: string; content: string; display: boolean };
-}
-export interface ToolCallResult {
-	input?: { command: string };
 }
 export interface ToolResultResult {
 	additionalContext?: string;
@@ -192,17 +189,14 @@ export interface ToolResultResult {
 export interface AgentIdentityInit {
 	kind: "main" | "sub";
 	id: string;
-	name?: string;
-	depth?: number;
-	parentId?: string;
 }
 
-export interface Notification {
+interface Notification {
 	message: string;
 	level: string;
 }
 
-export interface SentMessage {
+interface SentMessage {
 	message: unknown;
 	options: unknown;
 }

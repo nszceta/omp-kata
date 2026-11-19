@@ -261,10 +261,6 @@ export function messageTexts(req: RequestLog): string[] {
 	return req.messages.map(m => `${m.role}${m.customType ? `:${m.customType}` : ""}: ${messageText(m)}`);
 }
 
-export function agentRequests(res: RunResult, agent: string): RequestLog[] {
-	return res.requests.filter(r => r.agent === agent);
-}
-
 /** whole request (system + messages + any extra fields) flattened for substring assertions */
 export function fullText(req: RequestLog): string {
 	return JSON.stringify({ s: req.systemPrompt, m: req.messages });
@@ -272,12 +268,6 @@ export function fullText(req: RequestLog): string {
 
 export function count(haystack: string, needle: string): number {
 	return haystack.split(needle).length - 1;
-}
-
-/** the toolResult text for the Nth tool result (0-based) in the last request of an agent */
-export function toolResultText(req: RequestLog, n: number): string {
-	const results = req.messages.filter(m => m.role === "toolResult");
-	return messageText(results[n]);
 }
 
 /** run `fn` with a fresh isolated env; always tears down (daemon stop + rm) */
