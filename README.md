@@ -40,7 +40,7 @@ Set plugin settings with `omp plugin config set omp-kata <key> <value>`. Setting
 | `contractSource` | `OMP_KATA_CONTRACT_SOURCE` | string | `""` | passed as `--source` to `kata agent-contract-hook` when non-empty (replaces the built-in text; relative paths are resolved by kata against the workspace root) |
 | `inbox` | `OMP_KATA_INBOX` | boolean | `true` | inbox delivery |
 | `inboxPollSeconds` | `OMP_KATA_INBOX_POLL_SECONDS` | number ≥ 0 | `15` | minimum seconds between mid-turn checks; the idle watcher runs every `max(value, 5)` seconds; `0` checks after every tool result |
-| `wakeOnInbox` | `OMP_KATA_WAKE_ON_INBOX` | boolean | `false` | idle main session starts a turn when new requests arrive instead of only notifying |
+| `wakeOnInbox` | `OMP_KATA_WAKE_ON_INBOX` | boolean | `false` | idle main session starts a turn when new requests arrive instead of only notifying. **Security:** a woken turn runs tools with no human present, and the request text is written by whoever ran `kata notify`. To limit this, a wake happens only when every request comes from this session's own actor (`actor` or `actor/<teammate>`); any request from another actor is only announced. The sender (`from=`) is as asserted to kata (`KATA_AUTHOR`/`--as`), not authenticated, so enable only where every user who can reach the kata daemon is trusted |
 | `attention` | `OMP_KATA_ATTENTION` | boolean | `true` | attention lifecycle |
 | `identity` | `OMP_KATA_IDENTITY` | boolean | `true` | per-agent kata identity via the `PATH` shim; `false` leaves kata completely untouched (the shim passes through) |
 | `refGuard` | `OMP_KATA_REF_GUARD` | `block` \| `warn` \| `off` | `block` | stop kata issue refs from being written into repository content (see [Ref hygiene](#ref-hygiene)) |
@@ -81,7 +81,7 @@ The contract block injected into the system prompt ends with a short omp addendu
 
 - before every prompt (`before_agent_start`), delivered as a `kata-inbox` message;
 - after tool results, at most every `inboxPollSeconds`, delivered as extra context on that tool result;
-- in an **idle main session** every `max(inboxPollSeconds, 5)` seconds: by default a one-time notification per distinct inbox text (the next prompt carries the content); with `wakeOnInbox` the request is delivered immediately and a turn starts.
+- in an **idle main session** every `max(inboxPollSeconds, 5)` seconds: by default a one-time notification per distinct inbox text (the next prompt carries the content); with `wakeOnInbox` a request is delivered immediately and a turn starts, but only if every request in the inbox comes from this session's own actor (`actor` or `actor/<teammate>`). If any request comes from another actor, the idle session is only notified and the next prompt carries it. Enabling `wakeOnInbox` therefore lets the session's own actor, and anyone who can impersonate it to kata, start an agent turn unattended.
 
 Only changes are delivered. When a non-empty inbox becomes empty the agent gets one "now empty" notice. kata errors and timeouts change nothing and are retried at the next check.
 

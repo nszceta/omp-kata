@@ -7,6 +7,23 @@ export function countRequests(text: string): number {
 	return text.split("\n").filter(line => line.startsWith("- issue=")).length;
 }
 
+const REQUEST_LINE =
+	/^- issue=(?:"(?:[^"\\]|\\.)*"|\S+) title="(?:[^"\\]|\\.)*" from="((?:[^"\\]|\\.)*)" message=/;
+
+/**
+ * True when the inbox holds at least one request and every request was sent by `actor` itself
+ * (`actor` or `actor/<teammate>`: this session and its own subagents). A request line that does not
+ * parse counts as foreign. Anyone able to run `kata notify` can write the other requests.
+ */
+export function onlyOwnRequests(text: string, actor: string): boolean {
+	const lines = text.split("\n").filter(line => line.startsWith("- issue="));
+	if (lines.length === 0) return false;
+	return lines.every(line => {
+		const from = REQUEST_LINE.exec(line)?.[1];
+		return from !== undefined && (from === actor || from.startsWith(`${actor}/`));
+	});
+}
+
 export function formatInbox(text: string, user: string): string {
 	if (text === "") {
 		return `<kata_inbox>\nKata inbox for "${user}" is now empty; earlier requests were cleared or handled.\n</kata_inbox>`;
@@ -69,15 +86,15 @@ export class InboxTracker {
 	}
 
 	/**
-	 * Idle-session poll. With `wake` a new non-empty inbox is delivered (the caller starts a turn);
-	 * otherwise it is only announced once per distinct text and stays undelivered, so the next prompt
-	 * carries it.
+	 * Idle-session poll. With `wake` a new non-empty inbox whose requests all come from this session's
+	 * own actor is delivered (the caller starts a turn); anything else, or without `wake`, is only
+	 * announced once per distinct text and stays undelivered, so the next prompt carries it.
 	 */
 	async idlePoll(wake: boolean): Promise<IdleOutcome | undefined> {
 		if (this.checking) return undefined;
 		const text = await this.fetch();
 		if (text === undefined || text === "" || text === this.delivered) return undefined;
-		if (wake) {
+		if (wake && onlyOwnRequests(text, this.user.split("/")[0] ?? this.user)) {
 			this.delivered = text;
 			return { kind: "wake", payload: formatInbox(text, this.user), count: this.count };
 		}
