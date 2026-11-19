@@ -103,14 +103,18 @@ describe("/kata inbox", () => {
 		expect(ctx.notifications).toEqual([{ message: "kata inbox empty", level: "info" }]);
 	});
 
-	test("viewing the inbox does not count as delivering it", async () => {
+	test("viewing the inbox neither consumes it nor hides the count from status", async () => {
 		rig.fake.reply("inbox", { stdout: INBOX_TEXT });
 		const host = await rig.load({ OMP_KATA_CONTRACT: "0" });
 		const ctx = rig.session();
 
 		await host.runCommand("kata", "inbox", ctx);
-		const result = await prompt(host, ctx);
+		expect(ctx.notifications).toEqual([{ message: INBOX_TEXT, level: "info" }]);
 
+		await host.runCommand("kata", "status", ctx);
+		expect(ctx.notifications[1]?.message).toContain("inbox: 1 request(s)");
+
+		const result = await prompt(host, ctx);
 		expect(result?.message?.content).toBe(`<kata_inbox>\n${INBOX_FRAMING}\n${INBOX_TEXT}\n</kata_inbox>`);
 	});
 });
