@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ShimHost, sweepStaleStateDirs } from "../../src/shim";
 import { tempDir } from "./helpers";
@@ -27,6 +27,7 @@ function populate(root: string, name: string): string {
 	mkdirSync(join(dir, "bin"), { recursive: true });
 	writeFileSync(join(dir, "bin", "kata"), "x");
 	writeFileSync(join(dir, "s.env"), "x");
+	chmodSync(dir, 0o700);
 	return dir;
 }
 
@@ -62,6 +63,42 @@ describe("stale state dir sweep", () => {
 		expect(sweepStaleStateDirs(root)).toEqual([]);
 		expect(existsSync(join(target, "bin", "kata"))).toBe(true);
 		expect(existsSync(join(root, `omp-kata-${pid}-file01`))).toBe(true);
+	});
+
+	test("never follows symlinks inside a state dir", async () => {
+		const root = newRoot();
+		const target = populate(root, "precious");
+		writeFileSync(join(target, "kata"), "x");
+		const pid = await deadPid();
+		const dir = join(root, `omp-kata-${pid}-inner1`);
+		mkdirSync(dir, { mode: 0o700 });
+		symlinkSync(target, join(dir, "bin"));
+		symlinkSync(join(target, "s.env"), join(dir, "s.env"));
+		writeFileSync(join(dir, `s.env.${pid}.tmp`), "x");
+		expect(sweepStaleStateDirs(root)).toEqual([dir.slice(root.length + 1)]);
+		expect(existsSync(dir)).toBe(false);
+		for (const file of ["kata", "s.env", join("bin", "kata")]) expect(existsSync(join(target, file))).toBe(true);
+	});
+
+	test("leaves dirs with group/other permission bits or another owner alone", async () => {
+		const root = newRoot();
+		const pid = await deadPid();
+		const open = populate(root, `omp-kata-${pid}-open01`);
+		chmodSync(open, 0o770);
+		const foreign = populate(root, `omp-kata-${pid}-othr01`);
+		expect(sweepStaleStateDirs(root, (process.getuid?.() ?? 0) + 1)).toEqual([]);
+		expect(existsSync(foreign)).toBe(true);
+		expect(sweepStaleStateDirs(root)).toEqual([foreign.slice(root.length + 1)]);
+		expect(existsSync(open)).toBe(true);
+	});
+
+	test("never recurses: unexpected entries keep the dir", async () => {
+		const root = newRoot();
+		const dir = populate(root, `omp-kata-${await deadPid()}-extra1`);
+		mkdirSync(join(dir, "other"));
+		writeFileSync(join(dir, "other", "f"), "x");
+		expect(sweepStaleStateDirs(root)).toEqual([]);
+		expect(existsSync(join(dir, "other", "f"))).toBe(true);
 	});
 
 	test("a missing root is not an error", () => {
