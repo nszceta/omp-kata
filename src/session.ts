@@ -149,7 +149,7 @@ export class KataRuntime {
 		const identity = await this.identity();
 		if (!identity) return undefined;
 		if (this.inbox?.user !== identity.inboxUser) {
-			this.inbox = new InboxTracker(this.cli, this.root, identity.inboxUser, this.settings.inboxPollSeconds);
+			this.inbox = new InboxTracker(this.cli, this.root, identity.inboxUser, identity.actor, this.settings.inboxPollSeconds);
 		}
 		return this.inbox;
 	}
