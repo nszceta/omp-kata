@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { rmSync } from "node:fs";
 import { clearContractCache } from "../../src/contract";
 import { clearActorCache } from "../../src/identity";
+import { INBOX_FRAMING } from "../../src/inbox";
 import { ShimHost } from "../../src/shim";
 import { bashCall, bashResult, FakeCtx, type FakeHost, loadExtension, REAL_KATA, RealKata, tempDir } from "./helpers";
 import { MAIN_TAIL, prompt } from "./extension-harness";
@@ -146,7 +147,7 @@ describe("real kata through the extension", () => {
 
 		expect(subResult?.message?.customType).toBe("kata-inbox");
 		expect(subResult?.message?.display).toBe(true);
-		expect(subResult?.message?.content).toStartWith(`<kata_inbox>\nKata inbox for "unit-actor/${SUB}".`);
+		expect(subResult?.message?.content).toStartWith(`<kata_inbox>\n${INBOX_FRAMING}\nKata inbox for "unit-actor/${SUB}".`);
 		expect(subResult?.message?.content).toContain(`- issue="${ref}" title="Inbox delivery target" from="unit-actor" message="sub please look"`);
 		expect(subResult?.message?.content).toEndWith("\n</kata_inbox>");
 		// The main agent's address is `unit-actor`; a request for `unit-actor/<sub>` is not visible to it.

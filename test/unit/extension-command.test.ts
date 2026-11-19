@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { INBOX_FRAMING } from "../../src/inbox";
 import { FAKE_KATA, bashCall, bashResult } from "./helpers";
 import {
 	ADDENDUM_HEAD,
@@ -110,7 +111,7 @@ describe("/kata inbox", () => {
 		await host.runCommand("kata", "inbox", ctx);
 		const result = await prompt(host, ctx);
 
-		expect(result?.message?.content).toBe(`<kata_inbox>\n${INBOX_TEXT}\n</kata_inbox>`);
+		expect(result?.message?.content).toBe(`<kata_inbox>\n${INBOX_FRAMING}\n${INBOX_TEXT}\n</kata_inbox>`);
 	});
 });
 
