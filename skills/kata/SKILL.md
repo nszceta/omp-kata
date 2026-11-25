@@ -5,9 +5,10 @@ description: Operating guide for kata (the issue tracker) inside omp - how per-a
 
 # kata in omp
 
-The kata agent contract (search first, create, claim, `work.attention`, close with evidence) is already in
-your system prompt inside `<kata_contract>`. This guide only covers what is specific to omp. Do not
-re-read or restate the contract.
+In a kata workspace the kata agent contract (search first, create, claim, `work.attention`, close with
+evidence) is already in your system prompt inside `<kata_contract>`; outside one nothing is injected and
+`/kata` reports that. This guide only covers what is specific to omp. Do not re-read or restate the
+contract.
 
 ## What omp-kata does for you
 
