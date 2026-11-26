@@ -6,6 +6,7 @@
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { gitCommitMessages, kataMentions, projectRefsIn } from "./refs";
+import { sanitizeInline } from "./sanitize";
 
 export interface RefFinding {
 	/** The matched text: a bare id or `<project>#<id>`. */
@@ -15,7 +16,7 @@ export interface RefFinding {
 }
 
 export function refFindingReason(finding: RefFinding): string {
-	return `kata ref \`${finding.ref}\` in ${finding.where}: describe the change in words; record the cross-reference on the issue instead.`;
+	return `kata ref \`${finding.ref}\` in ${sanitizeInline(finding.where)}: describe the change in words; record the cross-reference on the issue instead.`;
 }
 
 /** Subcommands whose output names issues the agent now knows about. */

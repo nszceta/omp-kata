@@ -5,6 +5,8 @@
 # $OMP_KATA_STATE_DIR/$PI_SESSION_ID.env (KATA_AUTHOR, KATA_TEAMMATE, KATA_INBOX_USER, OMP_KATA_REAL).
 # Without such a file this is a transparent pass-through. Identity is applied here, at exec time, so
 # nothing in the agent's command text changes and a model-authored `export KATA_AUTHOR=...` cannot win.
+# This is attribution, not authorization: an agent running as the same user can read or rewrite the
+# state dir and can override PI_SESSION_ID/OMP_KATA_STATE_DIR/OMP_KATA_REAL. Never use it for access control.
 
 self_dir=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd -P)
 

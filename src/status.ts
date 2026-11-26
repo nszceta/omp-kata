@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import { sanitizeInline } from "./sanitize";
 
 export const STATUS_KEY = "kata";
 
@@ -9,8 +10,8 @@ export interface StatusInfo {
 }
 
 export function formatStatus(info: StatusInfo): string {
-	let text = `kata ${info.inboxUser}`;
-	if (info.tracked.length > 0) text += ` · ${info.tracked.join(",")}`;
+	let text = `kata ${sanitizeInline(info.inboxUser)}`;
+	if (info.tracked.length > 0) text += ` · ${info.tracked.map(sanitizeInline).join(",")}`;
 	if (info.inboxCount > 0) text += ` · inbox ${info.inboxCount}`;
 	return text;
 }

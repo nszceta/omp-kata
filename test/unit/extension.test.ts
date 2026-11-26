@@ -83,6 +83,16 @@ describe("contract injection", () => {
 		expect(await prompt(host, ctx, first?.systemPrompt)).toBeUndefined();
 	});
 
+	test("the injected contract block is identical across two prompts in a session", async () => {
+		const host = await rig.load();
+		const ctx = rig.session();
+
+		const first = await prompt(host, ctx);
+		const second = await prompt(host, ctx);
+
+		expect(second?.systemPrompt?.at(-1)).toBe(first?.systemPrompt?.at(-1));
+	});
+
 	test("contract=false (OMP_KATA_CONTRACT=0) injects nothing and never calls agent-contract-hook", async () => {
 		const host = await rig.load({ OMP_KATA_CONTRACT: "0" });
 		const ctx = rig.session();

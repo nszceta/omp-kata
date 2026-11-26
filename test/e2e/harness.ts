@@ -9,8 +9,13 @@ import type { Script } from "../fixtures/e2e/fake-provider.ts";
 export const REPO_ROOT = resolve(import.meta.dir, "../..");
 export const FAKE_PROVIDER = join(REPO_ROOT, "test/fixtures/e2e/fake-provider.ts");
 export const ACTOR = "e2e-actor";
-export const OMP = process.env.OMP_BIN ?? join(process.env.HOME ?? "", ".local/bin/omp");
-export const KATA = process.env.KATA_BIN ?? join(process.env.HOME ?? "", ".local/bin/kata");
+export const OMP = process.env.OMP_BIN ?? Bun.which("omp") ?? join(process.env.HOME ?? "", ".local/bin/omp");
+// OMP_KATA_REAL beats PATH: inside an agent session the plugin's shim is first on PATH.
+export const KATA =
+	process.env.KATA_BIN ??
+	process.env.OMP_KATA_REAL ??
+	Bun.which("kata") ??
+	join(process.env.HOME ?? "", ".local/bin/kata");
 
 export interface Exec {
 	code: number | null;

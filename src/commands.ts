@@ -3,6 +3,7 @@ import type { KataSettings } from "./config";
 import { clearContractCache } from "./contract";
 import { clearActorCache } from "./identity";
 import { InboxTracker } from "./inbox";
+import { sanitizeInline, stripControl } from "./sanitize";
 import type { KataRuntime } from "./session";
 
 export interface CommandHost {
@@ -25,19 +26,19 @@ export async function statusReport(host: CommandHost, ctx: ExtensionCommandConte
 	const settings = await host.settings(ctx);
 	const lines: string[] = [];
 	if (!rt) {
-		lines.push(`kata: not a kata workspace (no .kata.toml at or above ${ctx.cwd})`);
+		lines.push(`kata: not a kata workspace (no .kata.toml at or above ${sanitizeInline(ctx.cwd)})`);
 	} else {
 		const identity = await rt.identity();
-		lines.push(`kata workspace: ${rt.root}`);
-		lines.push(`actor: ${identity?.actor ?? "unknown (kata whoami failed)"}`);
-		lines.push(`teammate: ${identity?.teammate || "(none)"}`);
-		lines.push(`inbox user: ${identity?.inboxUser ?? "unknown"}`);
+		lines.push(`kata workspace: ${sanitizeInline(rt.root)}`);
+		lines.push(`actor: ${identity ? sanitizeInline(identity.actor) : "unknown (kata whoami failed)"}`);
+		lines.push(`teammate: ${identity?.teammate ? sanitizeInline(identity.teammate) : "(none)"}`);
+		lines.push(`inbox user: ${identity ? sanitizeInline(identity.inboxUser) : "unknown"}`);
 		await rt.reconcileTracked(true);
-		lines.push(`tracked refs: ${rt.attention.refs().join(", ") || "(none)"}`);
+		lines.push(`tracked refs: ${rt.attention.refs().map(sanitizeInline).join(", ") || "(none)"}`);
 		lines.push(`contract: ${describeContract(rt)}`);
 		lines.push(`inbox: ${rt.inbox ? `${rt.inbox.count} request(s)` : "not checked yet"}`);
 	}
-	lines.push(`settings: ${JSON.stringify(settings)}`);
+	lines.push(`settings: ${sanitizeInline(JSON.stringify(settings))}`);
 	return lines.join("\n");
 }
 
@@ -48,8 +49,8 @@ export async function inboxReport(host: CommandHost, ctx: ExtensionCommandContex
 	if (!identity) return "kata: could not resolve the kata actor (kata whoami failed)";
 	const tracker = rt.inbox ?? new InboxTracker(rt.cli, rt.root, identity.inboxUser, identity.actor, rt.settings.inboxPollSeconds);
 	const text = await tracker.fetch();
-	if (text === undefined) return `kata: could not read the inbox for ${identity.inboxUser}`;
-	return text === "" ? "kata inbox empty" : text;
+	if (text === undefined) return `kata: could not read the inbox for ${sanitizeInline(identity.inboxUser)}`;
+	return text === "" ? "kata inbox empty" : stripControl(text, true);
 }
 
 export function registerKataCommand(pi: ExtensionAPI, host: CommandHost, onRefresh: (ctx: ExtensionCommandContext) => void): void {
