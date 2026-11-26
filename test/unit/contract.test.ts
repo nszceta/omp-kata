@@ -311,6 +311,25 @@ describe("ompAddendum", () => {
 			expect(text).not.toContain("kata() {");
 		}
 	});
+
+	test("identity delivery off drops the automatic-identity claim and the identity line", () => {
+		const DISABLED =
+			"omp-kata: identity delivery is disabled (`identity=false`); kata runs with the identity from your environment. Do not export KATA_AUTHOR, KATA_TEAMMATE or KATA_INBOX_USER for kata commands.";
+		const text = ompAddendum({ actor: "adam", teammate: "bob", inboxUser: "adam/bob" }, false, false);
+		expect(text).toBe(`${DISABLED}\n${ATTENTION}`);
+		expect(text).not.toContain("omp sets kata identity automatically");
+		expect(text).not.toContain("teammate=");
+		expect(text).not.toContain("inbox=");
+		// the main-agent tail is unchanged
+		expect(ompAddendum({ actor: "adam", teammate: "", inboxUser: "adam" }, true, false)).toContain("Main agent: ");
+	});
+
+	test("identity delivery on keeps the automatic-identity claim and the identity line", () => {
+		const text = ompAddendum({ actor: "adam", teammate: "bob", inboxUser: "adam/bob" }, false, true);
+		expect(text).toContain("omp sets kata identity automatically");
+		expect(text).toContain("teammate=bob");
+		expect(text).toContain("inbox=adam/bob");
+	});
 });
 
 describe("getContract against real kata", () => {

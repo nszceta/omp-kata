@@ -73,9 +73,9 @@ If a future omp quotes the command, executes the prefix as an argv, or builds it
 | main | `kata whoami` actor (honors `KATA_AUTHOR`) | `$KATA_TEAMMATE` or none | `$KATA_INBOX_USER`, else `actor[/teammate]` |
 | subagent | same actor | its agent id (e.g. `HandicappedSailfish`) | `actor/<agent id>` |
 
-Subagents never read `KATA_TEAMMATE`, `KATA_INBOX_USER` or `KATA_REF` from the environment (they are shared with the main agent). A teammate-less identity unsets `KATA_TEAMMATE` (kata treats an empty value like an unset one — verified). With `identity=false` no file is written and nothing about kata changes.
+Subagents never read `KATA_TEAMMATE`, `KATA_INBOX_USER` or `KATA_REF` from the environment (they are shared with the main agent). A teammate-less identity unsets `KATA_TEAMMATE` (kata treats an empty value like an unset one — verified). Concurrent main sessions share the bare actor's inbox address; set `KATA_INBOX_USER` to give a session its own address. With `identity=false` no file is written and nothing about kata changes.
 
-The contract block injected into the system prompt ends with a short omp addendum giving this agent's actor/teammate/inbox address and telling agents not to export those variables or put them in task assignments. For the main agent only, it adds a line telling it to keep kata current as it works: close each issue its work resolves right away with evidence, but only after verifying every acceptance criterion; unverified or partial work gets a progress comment instead.
+The contract block injected into the system prompt ends with a short omp addendum giving this agent's actor/teammate/inbox address when identity delivery is on and telling agents not to export those variables or put them in task assignments. For the main agent only, it adds a line telling it to keep kata current as it works: close each issue its work resolves right away with evidence, but only after verifying every acceptance criterion; unverified or partial work gets a progress comment instead.
 
 ### Inbox
 
