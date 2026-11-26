@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { AttentionTracker } from "./attention";
-import { type Env, type KataSettings, resolveSettings, type SettingsLoader } from "./config";
+import { type Env, type KataSettings, resolveSettings, sanitizeSettings, type SettingsLoader } from "./config";
 import { type ContractResult, getContract, ompAddendum, withContract } from "./contract";
 import { type AgentIdentity, deriveIdentity, type Identity, lookupActor } from "./identity";
 import { RefGuard, refFindingReason } from "./guard";
@@ -39,6 +39,10 @@ export class KataRuntime {
 	private identityValue: Identity | undefined;
 	private identityPending: Promise<Identity | undefined> | undefined;
 	private identityRetryAt = 0;
+	/** Bumped when published identities are dropped: a sync that awaited whoami must not publish after it. */
+	private identityGeneration = 0;
+	/** Set once this runtime's session is going away: late event handlers must not publish or track anything. */
+	private retired = false;
 	/** Session ids whose identity file is currently published. */
 	private readonly published = new Set<string>();
 	/** Absolute path of the real kata (never the shim). */
@@ -66,7 +70,7 @@ export class KataRuntime {
 	static async create(cwd: string, agent: AgentIdentity, deps: RuntimeDeps): Promise<KataRuntime | undefined> {
 		const root = findWorkspaceRoot(cwd);
 		if (root === undefined) return undefined;
-		const settings = await resolveSettings(cwd, { env: deps.env, loader: deps.loadSettings });
+		const settings = sanitizeSettings(await resolveSettings(cwd, { env: deps.env, loader: deps.loadSettings }), root);
 		return new KataRuntime(root, settings, agent, deps);
 	}
 
@@ -95,10 +99,16 @@ export class KataRuntime {
 	}
 
 	forgetIdentity(): void {
+		this.identityGeneration++;
 		this.identityValue = undefined;
 		this.identityRetryAt = 0;
 		// Published files carry the old identity; the next sync rewrites them.
 		this.published.clear();
+	}
+
+	/** Marks the runtime as finished; {@link retire} is idempotent. Later syncs, claims and reconciles are dropped. */
+	retire(): void {
+		this.retired = true;
 	}
 
 	/**
@@ -107,9 +117,12 @@ export class KataRuntime {
 	 * and before every bash tool call.
 	 */
 	async syncIdentity(sessionId: string): Promise<void> {
-		if (!this.settings.identity || this.published.has(sessionId)) return;
+		if (this.retired || !this.settings.identity || this.published.has(sessionId)) return;
 		if (sessionId === "" || /[\/\0]/.test(sessionId)) return;
+		const generation = this.identityGeneration;
 		const identity = await this.identity();
+		// a switch/shutdown/refresh dropped identities while whoami ran
+		if (generation !== this.identityGeneration || this.retired) return;
 		if (!identity || this.published.has(sessionId)) return;
 		try {
 			this.deps.shim.install(this.real);
@@ -131,6 +144,7 @@ export class KataRuntime {
 	}
 
 	dropAllIdentities(): void {
+		this.identityGeneration++;
 		for (const sessionId of [...this.published]) this.dropIdentity(sessionId);
 	}
 
@@ -140,7 +154,7 @@ export class KataRuntime {
 		// Identity first: the addendum states this agent's identity, and the block must be stable across prompts.
 		const [result, identity] = await Promise.all([getContract(this.cli, this.settings, this.root), this.identity()]);
 		this.lastContract = result;
-		const next = withContract(systemPrompt, result, ompAddendum(identity, this.agent.kind === "main"));
+		const next = withContract(systemPrompt, result, ompAddendum(identity, this.agent.kind === "main", this.settings.identity));
 		return { systemPrompt: next, failure: result.ok ? undefined : result.reason };
 	}
 
@@ -170,6 +184,18 @@ export class KataRuntime {
 	async inboxIdlePoll(): Promise<IdleOutcome | undefined> {
 		return (await this.inboxTracker())?.idlePoll(this.settings.wakeOnInbox);
 	}
+	/**
+	 * Inbox text for `/kata inbox`: a fetch, never a check, so viewing does not mark requests delivered.
+	 * Uses the session tracker (keeping `inbox.count` fresh) unless `settings.inbox` is off.
+	 */
+	async readInbox(): Promise<string | undefined> {
+		const identity = await this.identity();
+		if (!identity) return undefined;
+		const tracker =
+			(await this.inboxTracker()) ??
+			new InboxTracker(this.cli, this.root, identity.inboxUser, identity.actor, this.settings.inboxPollSeconds);
+		return tracker.fetch();
+	}
 
 	async statusInfo(): Promise<StatusInfo | undefined> {
 		const identity = await this.identity();
@@ -179,15 +205,18 @@ export class KataRuntime {
 
 	/** Main sessions launched with KATA_REF track that issue from the start (never closed ones). */
 	async startEnvRef(sessionId: string): Promise<void> {
-		if (!this.settings.attention || this.agent.kind !== "main") return;
+		if (this.retired || !this.settings.attention || this.agent.kind !== "main") return;
 		const ref = this.deps.env.KATA_REF;
 		if (!ref || ref.startsWith("-")) return;
+		const checkpoint = this.attention.checkpoint();
 		if (await this.attention.isClosed(ref)) return;
+		// the session may have ended while `show` ran
+		if (!this.attention.unchanged(checkpoint)) return;
 		await this.attention.start(ref, sessionId);
 	}
 
 	async trackBash(command: unknown, sessionId: string): Promise<boolean> {
-		if (!this.settings.attention || typeof command !== "string") return false;
+		if (this.retired || !this.settings.attention || typeof command !== "string") return false;
 		return this.attention.applyCommand(command, sessionId, this.kataNames);
 	}
 
@@ -196,7 +225,7 @@ export class KataRuntime {
 	 * run at most every RECONCILE_INTERVAL_MS; concurrent calls share one run. Returns whether tracking changed.
 	 */
 	reconcileTracked(force = false): Promise<boolean> {
-		if (this.reconcilePending) return this.reconcilePending;
+		if (this.retired || this.reconcilePending) return this.reconcilePending ?? Promise.resolve(false);
 		const now = this.deps.now();
 		if (this.attention.refs().length === 0 || (!force && now < this.reconcileAt)) return Promise.resolve(false);
 		this.reconcileAt = now + RECONCILE_INTERVAL_MS;

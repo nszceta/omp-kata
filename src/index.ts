@@ -3,6 +3,7 @@ import { type Env, resolveSettings, type SettingsLoader } from "./config";
 import { registerKataCommand } from "./commands";
 import { KataRuntime, type RuntimeDeps } from "./session";
 import { type ShimHost, sharedShimHost } from "./shim";
+import { sanitizeInline } from "./sanitize";
 import { updateStatus } from "./status";
 import { findWorkspaceRoot } from "./workspace";
 import type { AgentIdentity } from "./identity";
@@ -91,10 +92,12 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 			// Subagent sessions have no UI and would consume the process-wide one-time notice for nothing.
 			if (!ctx.hasUI) return;
 			const warning = rt.takeShimWarning();
-			if (warning !== undefined) ctx.ui.notify(warning, "warning");
+			if (warning !== undefined) ctx.ui.notify(sanitizeInline(warning), "warning");
 		};
 
 		const beginSession = async (ctx: ExtensionContext, rt: KataRuntime | undefined): Promise<void> => {
+			// Also when the new cwd is not a kata workspace: the old session's watcher must not survive the switch.
+			stopWatcher();
 			if (!rt) {
 				updateStatus(ctx, undefined);
 				return;
@@ -103,7 +106,8 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 			void rt
 				.syncIdentity(sessionId(ctx))
 				.then(() => warnShim(ctx, rt))
-				.then(() => refreshStatus(ctx, rt));
+				.then(() => refreshStatus(ctx, rt))
+				.catch(() => {});
 			await rt.startEnvRef(sessionId(ctx));
 			await refreshStatus(ctx, rt);
 		};
@@ -114,16 +118,24 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 
 		pi.on("session_switch", async (_event, ctx) => {
 			const previous = await current?.runtime;
-			previous?.dropAllIdentities();
-			previous?.attention.endAll();
+			if (previous) {
+				// refs closed/owned elsewhere since the last check must not get an `end` (they are untracked, not ended)
+				await previous.reconcileTracked(true);
+				previous.retire();
+				previous.dropAllIdentities();
+				previous.attention.endAll();
+			}
 			await beginSession(ctx, await resetRuntime(ctx));
 		});
 
 		pi.on("session_shutdown", async (_event, ctx) => {
 			stopWatcher();
 			const rt = await current?.runtime;
-			rt?.dropAllIdentities();
-			rt?.attention.endAll();
+			if (rt) {
+				rt.retire();
+				rt.dropAllIdentities();
+				rt.attention.endAll();
+			}
 			updateStatus(ctx, undefined);
 		});
 
@@ -135,7 +147,7 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 				rt.inboxForPrompt(),
 				rt.syncIdentity(sessionId(ctx)),
 				rt.reconcileTracked(true),
-			]).then(([c, i]) => [c, i] as const);
+			]);
 			warnShim(ctx, rt);
 			if (contract.failure !== undefined && !rt.contractWarned) {
 				rt.contractWarned = true;
@@ -167,16 +179,18 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 		pi.on("tool_result", async (event, ctx) => {
 			const rt = await runtimeFor(ctx);
 			if (!rt) return undefined;
+			let dirty = false;
 			if (event.toolName === "bash" && !event.isError) {
 				const output = event.content.map(part => (part.type === "text" ? part.text : "")).join("\n");
 				rt.observeBashOutput(event.input.command, output);
-				if (await rt.trackBash(event.input.command, sessionId(ctx))) await refreshStatus(ctx, rt);
+				dirty = (await rt.trackBash(event.input.command, sessionId(ctx))) || dirty;
 			}
 			// subagents close their issues out of this session's sight; a finished task is the likely moment
-			if (await rt.reconcileTracked(event.toolName === "task")) await refreshStatus(ctx, rt);
+			dirty = (await rt.reconcileTracked(event.toolName === "task")) || dirty;
 			const warning = rt.takeRefWarning(event.toolCallId);
 			const inbox = await rt.inboxForToolResult();
-			if (inbox !== undefined) await refreshStatus(ctx, rt);
+			dirty = dirty || inbox !== undefined;
+			if (dirty) await refreshStatus(ctx, rt);
 			const context = [warning, inbox].filter((text): text is string => text !== undefined);
 			return context.length === 0 ? undefined : { additionalContext: context.join("\n\n") };
 		});
@@ -189,7 +203,7 @@ export function createKataExtension(options: KataExtensionOptions = {}): Extensi
 				workspaceRoot: findWorkspaceRoot,
 			},
 			() => {
-				void current?.runtime.then(rt => rt?.forgetIdentity());
+				void current?.runtime.then(rt => rt?.forgetIdentity()).catch(() => {});
 			},
 		);
 	};

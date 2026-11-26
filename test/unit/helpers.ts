@@ -6,10 +6,16 @@ import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createKataExtension, type KataExtensionOptions } from "../../src/index";
+import type { KataExtensionOptions } from "../../src/index";
 
 export const FAKE_KATA = resolve(import.meta.dir, "../fixtures/fake-kata");
-export const REAL_KATA = process.env.KATA_BIN ?? join(process.env.HOME ?? "", ".local/bin/kata");
+// OMP_KATA_REAL beats PATH: inside an agent session the plugin's shim is first on PATH. The plugin's
+// module load detaches that inherited shim (deleting OMP_KATA_REAL), so it is imported dynamically below.
+export const REAL_KATA =
+	process.env.KATA_BIN ??
+	process.env.OMP_KATA_REAL ??
+	Bun.which("kata") ??
+	join(process.env.HOME ?? "", ".local/bin/kata");
 
 export function tempDir(prefix = "omp-kata-unit-"): string {
 	return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
@@ -101,7 +107,7 @@ export async function waitFor(predicate: () => boolean, timeoutMs = 5000, what =
 	}
 }
 
-export interface KataResult {
+interface KataResult {
 	code: number;
 	stdout: string;
 	stderr: string;
@@ -170,14 +176,11 @@ export class RealKata {
 	}
 }
 
-export type Handler = (event: Record<string, unknown>, ctx: ExtensionContext) => unknown;
+type Handler = (event: Record<string, unknown>, ctx: ExtensionContext) => unknown;
 
 export interface PromptResult {
 	systemPrompt?: string[];
 	message?: { customType: string; content: string; display: boolean };
-}
-export interface ToolCallResult {
-	input?: { command: string };
 }
 export interface ToolResultResult {
 	additionalContext?: string;
@@ -186,17 +189,14 @@ export interface ToolResultResult {
 export interface AgentIdentityInit {
 	kind: "main" | "sub";
 	id: string;
-	name?: string;
-	depth?: number;
-	parentId?: string;
 }
 
-export interface Notification {
+interface Notification {
 	message: string;
 	level: string;
 }
 
-export interface SentMessage {
+interface SentMessage {
 	message: unknown;
 	options: unknown;
 }
@@ -310,6 +310,7 @@ export class FakeHost {
 /** Loads the extension into a fresh FakeHost (one host = one omp session). */
 export async function loadExtension(options: KataExtensionOptions = {}): Promise<FakeHost> {
 	const host = new FakeHost();
+	const { createKataExtension } = await import("../../src/index");
 	await createKataExtension(options)(host.api);
 	return host;
 }

@@ -37,22 +37,24 @@ export function shellQuote(value: string): string {
 	return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-const actorCache = new Map<string, string>();
+const actorCache = new Map<string, Map<string, string>>();
 
-function actorKey(cli: KataCli, root: string, env: Env): string {
-	return `${cli.executable}\0${root}\0${env.KATA_AUTHOR ?? ""}`;
+function actorKey(cli: KataCli, env: Env): string {
+	return `${cli.executable}\0${env.KATA_AUTHOR ?? ""}`;
 }
 
 /** `kata whoami --json` -> actor, cached per process per (executable, root, KATA_AUTHOR). Failures are not cached. */
 export async function lookupActor(cli: KataCli, root: string, env: Env = process.env): Promise<string | undefined> {
-	const key = actorKey(cli, root, env);
-	const cached = actorCache.get(key);
+	const key = actorKey(cli, env);
+	const scoped = actorCache.get(root);
+	const cached = scoped?.get(key);
 	if (cached !== undefined) return cached;
 	const result = await cli.run(["whoami", "--json"], { cwd: root, timeoutMs: 10_000, env });
 	if (result.code !== 0) return undefined;
 	const actor = parseJsonObject(result.stdout)?.actor;
 	if (typeof actor !== "string" || actor === "") return undefined;
-	actorCache.set(key, actor);
+	if (!scoped) actorCache.set(root, new Map([[key, actor]]));
+	else scoped.set(key, actor);
 	return actor;
 }
 
@@ -61,7 +63,5 @@ export function clearActorCache(root?: string): void {
 		actorCache.clear();
 		return;
 	}
-	for (const key of [...actorCache.keys()]) {
-		if (key.split("\0")[1] === root) actorCache.delete(key);
-	}
+	actorCache.delete(root);
 }

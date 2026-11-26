@@ -18,16 +18,17 @@ function decoyDir(): string {
 	return dir;
 }
 
+/** Resolves the shell with the parent's PATH, so the child can still be given a simulated PATH. */
+const shellPath = (shell: string): string => (shell.includes("/") ? shell : (Bun.which(shell) ?? shell));
+
 /** Runs `commands` in ONE bash process, each as omp does: `${PI_SHELL_PREFIX} ${command}`. */
 function runAsOmp(prefix: string, startPath: string, commands: string[], shell = "bash"): string[] {
 	const script = commands.map(c => `${prefix} ${c}`).join("\n");
-	const result = Bun.spawnSync([shell, "-c", script], { env: { PATH: startPath, HOME: "/nonexistent" } });
+	const result = Bun.spawnSync([shellPath(shell), "-c", script], { env: { PATH: startPath, HOME: "/nonexistent" } });
 	return result.stdout.toString().trimEnd().split("\n");
 }
 
 describe("composeShellPrefix in a real shell", () => {
-	const shimDir = "/tmp/omp-kata-test-shim/bin";
-
 	test("puts the shim dir first even when an rc-built PATH has a decoy kata in front", () => {
 		const decoy = decoyDir();
 		const shim = tempDir("omp-kata-shim-");
@@ -52,7 +53,7 @@ describe("composeShellPrefix in a real shell", () => {
 		const step = `PATH=/rc:$PATH; ${prefix} :`;
 		for (const shell of ["bash", "sh"]) {
 			const script = `${step}\n${step}\n${step}\necho "$PATH"`;
-			const result = Bun.spawnSync([shell, "-c", script], { env: { PATH: "/S:/usr/bin:/bin", HOME: "/nonexistent" } });
+			const result = Bun.spawnSync([shellPath(shell), "-c", script], { env: { PATH: "/S:/usr/bin:/bin", HOME: "/nonexistent" } });
 			expect(result.stdout.toString().trim()).toBe("/S:/rc:/S:/rc:/S:/rc:/S:/usr/bin:/bin");
 		}
 	});
@@ -72,7 +73,7 @@ describe("composeShellPrefix in a real shell", () => {
 		const prefix = composeShellPrefix("/tmp/x-shim", undefined);
 		const out = runAsOmp(prefix, "/usr/bin:/bin", ['echo "[${__omp_kata_d-unset}]"', "cd /tmp", "pwd"]);
 		expect(out).toEqual(["[unset]", "/tmp"]);
-		expect(Bun.spawnSync(["bash", "-c", `${prefix} exit 7`], { env: { PATH: "/usr/bin:/bin" } }).exitCode).toBe(7);
+		expect(Bun.spawnSync([shellPath("bash"), "-c", `${prefix} exit 7`], { env: { PATH: "/usr/bin:/bin" } }).exitCode).toBe(7);
 	});
 
 	test("a user's own prefix is kept after ours and runs", () => {

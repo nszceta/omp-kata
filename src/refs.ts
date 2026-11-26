@@ -583,8 +583,12 @@ function commitSegment(words: string[], state: { messages: string[]; stdin: bool
 	}
 }
 
+/** Bound on nested command substitutions: a model/repo-supplied command must not exhaust the stack. */
+const MAX_SUBSTITUTION_DEPTH = 64;
+
 /** Bodies of the here-documents inside `$(...)` and backtick substitutions of `segments`' words, at any depth. */
-function substitutionHeredocs(segments: string[][], out: string[]): void {
+function substitutionHeredocs(segments: string[][], out: string[], depth = 0): void {
+	if (depth > MAX_SUBSTITUTION_DEPTH) return;
 	for (const words of segments) {
 		for (const word of words) {
 			for (let i = 0; i < word.length; i++) {
@@ -600,7 +604,7 @@ function substitutionHeredocs(segments: string[][], out: string[]): void {
 				} else continue;
 				const scanned = scanCommand(inner);
 				out.push(...scanned.heredocs, ...scanned.hereStrings);
-				substitutionHeredocs([...scanned.segments, scanned.hereStrings], out);
+				substitutionHeredocs([...scanned.segments, scanned.hereStrings], out, depth + 1);
 			}
 		}
 	}

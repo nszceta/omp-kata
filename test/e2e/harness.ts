@@ -9,8 +9,13 @@ import type { Script } from "../fixtures/e2e/fake-provider.ts";
 export const REPO_ROOT = resolve(import.meta.dir, "../..");
 export const FAKE_PROVIDER = join(REPO_ROOT, "test/fixtures/e2e/fake-provider.ts");
 export const ACTOR = "e2e-actor";
-export const OMP = process.env.OMP_BIN ?? join(process.env.HOME ?? "", ".local/bin/omp");
-export const KATA = process.env.KATA_BIN ?? join(process.env.HOME ?? "", ".local/bin/kata");
+export const OMP = process.env.OMP_BIN ?? Bun.which("omp") ?? join(process.env.HOME ?? "", ".local/bin/omp");
+// OMP_KATA_REAL beats PATH: inside an agent session the plugin's shim is first on PATH.
+export const KATA =
+	process.env.KATA_BIN ??
+	process.env.OMP_KATA_REAL ??
+	Bun.which("kata") ??
+	join(process.env.HOME ?? "", ".local/bin/kata");
 
 export interface Exec {
 	code: number | null;
@@ -256,10 +261,6 @@ export function messageTexts(req: RequestLog): string[] {
 	return req.messages.map(m => `${m.role}${m.customType ? `:${m.customType}` : ""}: ${messageText(m)}`);
 }
 
-export function agentRequests(res: RunResult, agent: string): RequestLog[] {
-	return res.requests.filter(r => r.agent === agent);
-}
-
 /** whole request (system + messages + any extra fields) flattened for substring assertions */
 export function fullText(req: RequestLog): string {
 	return JSON.stringify({ s: req.systemPrompt, m: req.messages });
@@ -267,12 +268,6 @@ export function fullText(req: RequestLog): string {
 
 export function count(haystack: string, needle: string): number {
 	return haystack.split(needle).length - 1;
-}
-
-/** the toolResult text for the Nth tool result (0-based) in the last request of an agent */
-export function toolResultText(req: RequestLog, n: number): string {
-	const results = req.messages.filter(m => m.role === "toolResult");
-	return messageText(results[n]);
 }
 
 /** run `fn` with a fresh isolated env; always tears down (daemon stop + rm) */

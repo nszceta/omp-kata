@@ -1,10 +1,16 @@
 import type { KataCli } from "./kata";
+import { sanitizeInFence, sanitizeInline, stripControl } from "./sanitize";
 
 const FETCH_TIMEOUT_MS = 5_000;
 
-/** Number of requests in `kata inbox --context` output (one `- issue=...` line each). */
+/** Request rows of `kata inbox --context` output (`- issue="<id>" title=... from=... message=...`), in order. */
+export function requestRows(text: string): string[] {
+	return text.split("\n").filter(line => line.startsWith("- issue="));
+}
+
+/** Number of requests in `kata inbox --context` output. */
 export function countRequests(text: string): number {
-	return text.split("\n").filter(line => line.startsWith("- issue=")).length;
+	return requestRows(text).length;
 }
 
 /** First line inside a non-empty inbox block: the contents are untrusted data written by other users. */
@@ -31,7 +37,7 @@ const REQUEST_LINE =
  */
 export function onlyOwnRequests(text: string, actor: string): boolean {
 	if (/^\[\d+ request\(s\) omitted/m.test(text)) return false;
-	const lines = text.split("\n").filter(line => line.startsWith("- issue="));
+	const lines = requestRows(text);
 	if (lines.length === 0) return false;
 	return lines.every(line => {
 		const from = REQUEST_LINE.exec(line)?.[1];
@@ -41,9 +47,9 @@ export function onlyOwnRequests(text: string, actor: string): boolean {
 
 export function formatInbox(text: string, user: string): string {
 	if (text === "") {
-		return `<kata_inbox>\nKata inbox for "${user}" is now empty; earlier requests were cleared or handled.\n</kata_inbox>`;
+		return `<kata_inbox>\nKata inbox for "${sanitizeInFence(user)}" is now empty; earlier requests were cleared or handled.\n</kata_inbox>`;
 	}
-	return `<kata_inbox>\n${INBOX_FRAMING}\n${escapeInbox(text)}\n</kata_inbox>`;
+	return `<kata_inbox>\n${INBOX_FRAMING}\n${escapeInbox(stripControl(text, true))}\n</kata_inbox>`;
 }
 
 export type IdleOutcome =
@@ -59,6 +65,10 @@ export class InboxTracker {
 	private lastCheck = Number.NEGATIVE_INFINITY;
 	private notified = "";
 	private checking = false;
+	/** Request rows already delivered in this session; keyed by exact row text so an edited message is new. */
+	private readonly deliveredRows = new Set<string>();
+	/** Whether the kata header preamble has been delivered; later payloads carry only the new rows. */
+	private preambleDelivered = false;
 
 	constructor(
 		private readonly cli: KataCli,
@@ -85,6 +95,19 @@ export class InboxTracker {
 		return this.pollSeconds === 0 || now - this.lastCheck >= this.pollSeconds * 1000;
 	}
 
+	/**
+	 * Payload text for `fresh`: the first delivery carries the whole snapshot (kata's header preamble plus
+	 * all rows); later deliveries carry only the new rows. Marks the rows delivered.
+	 */
+	private takeFresh(text: string, fresh: string[]): string {
+		for (const row of fresh) this.deliveredRows.add(row);
+		if (!this.preambleDelivered) {
+			this.preambleDelivered = true;
+			return text;
+		}
+		return fresh.join("\n");
+	}
+
 	/** Fetches and returns the payload to deliver when the inbox differs from what was delivered. */
 	async check(now: number): Promise<string | undefined> {
 		// Parallel tool results race: only one poll runs at a time so a payload is never delivered twice.
@@ -93,9 +116,18 @@ export class InboxTracker {
 		this.lastCheck = now;
 		try {
 			const text = await this.fetch();
-			if (text === undefined || text === this.delivered) return undefined;
+			if (text === undefined) return undefined;
+			if (text === "") {
+				if (this.delivered === "") return undefined;
+				this.delivered = "";
+				this.deliveredRows.clear();
+				this.preambleDelivered = false;
+				return formatInbox("", this.user);
+			}
+			if (text === this.delivered) return undefined;
+			const fresh = requestRows(text).filter(row => !this.deliveredRows.has(row));
 			this.delivered = text;
-			return formatInbox(text, this.user);
+			return fresh.length === 0 ? undefined : formatInbox(this.takeFresh(text, fresh), this.user);
 		} finally {
 			this.checking = false;
 		}
@@ -108,14 +140,22 @@ export class InboxTracker {
 	 */
 	async idlePoll(wake: boolean): Promise<IdleOutcome | undefined> {
 		if (this.checking) return undefined;
-		const text = await this.fetch();
-		if (text === undefined || text === "" || text === this.delivered) return undefined;
-		if (wake && onlyOwnRequests(text, this.actor)) {
-			this.delivered = text;
-			return { kind: "wake", payload: formatInbox(text, this.user), count: this.count };
+		this.checking = true;
+		try {
+			const text = await this.fetch();
+			if (text === undefined || text === "" || text === this.delivered) return undefined;
+			if (wake && onlyOwnRequests(text, this.actor)) {
+				const fresh = requestRows(text).filter(row => !this.deliveredRows.has(row));
+				this.delivered = text;
+				if (fresh.length > 0) {
+					return { kind: "wake", payload: formatInbox(this.takeFresh(text, fresh), this.user), count: this.count };
+				}
+			}
+			if (text === this.notified) return undefined;
+			this.notified = text;
+			return { kind: "notify", message: `kata: ${this.count} inbox request(s) for ${sanitizeInline(this.user)}`, count: this.count };
+		} finally {
+			this.checking = false;
 		}
-		if (text === this.notified) return undefined;
-		this.notified = text;
-		return { kind: "notify", message: `kata: ${this.count} inbox request(s) for ${this.user}`, count: this.count };
 	}
 }
