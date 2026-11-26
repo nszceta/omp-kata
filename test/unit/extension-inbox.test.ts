@@ -93,7 +93,7 @@ describe("inbox after tool results", () => {
 		expect(rig.calls("inbox")).toHaveLength(1);
 
 		rig.time = T0 + 15_000;
-		expect(await host.emitOne("tool_result", bashResult("ls"), ctx)).toEqual({ additionalContext: INBOX_PAYLOAD });
+		expect(await host.emitOne<{ additionalContext: string }>("tool_result", bashResult("ls"), ctx)).toEqual({ additionalContext: INBOX_PAYLOAD });
 		expect(rig.calls("inbox")).toHaveLength(2);
 
 		// Unchanged text on the next due poll: checked, not redelivered.
@@ -110,7 +110,7 @@ describe("inbox after tool results", () => {
 		expect(rig.calls("inbox")).toHaveLength(3);
 
 		rig.fake.reply("inbox", { stdout: INBOX_TEXT });
-		expect(await host.emitOne("tool_result", bashResult("ls"), ctx)).toEqual({ additionalContext: INBOX_PAYLOAD });
+		expect(await host.emitOne<{ additionalContext: string }>("tool_result", bashResult("ls"), ctx)).toEqual({ additionalContext: INBOX_PAYLOAD });
 	});
 
 	test("a request delivered with a tool result is not delivered again at the next prompt", async () => {
@@ -118,7 +118,7 @@ describe("inbox after tool results", () => {
 		const host = await rig.load(NO_CONTRACT);
 		const ctx = rig.session();
 
-		expect(await host.emitOne("tool_result", bashResult("ls"), ctx)).toEqual({ additionalContext: INBOX_PAYLOAD });
+		expect(await host.emitOne<{ additionalContext: string }>("tool_result", bashResult("ls"), ctx)).toEqual({ additionalContext: INBOX_PAYLOAD });
 		expect(await prompt(host, ctx)).toBeUndefined();
 	});
 });
@@ -151,6 +151,19 @@ describe("idle inbox watcher", () => {
 		const attentionOnly = rig.session();
 		await (await rig.load({ OMP_KATA_INBOX: "0" })).emit("session_start", {}, attentionOnly);
 		expect(attentionOnly.intervals).toHaveLength(1);
+	});
+
+	test("a switch to a cwd outside the workspace stops the old watcher", async () => {
+		const host = await rig.load(NO_CONTRACT);
+		const ctx = rig.session();
+		await host.emit("session_start", {}, ctx);
+		expect(ctx.liveIntervals).toHaveLength(1);
+
+		const outside = rig.session({ cwd: rig.ws.outside });
+		await host.emit("session_switch", {}, outside);
+
+		expect(ctx.liveIntervals).toEqual([]);
+		expect(outside.liveIntervals).toEqual([]);
 	});
 
 	test("a tick while the agent is busy never calls kata", async () => {

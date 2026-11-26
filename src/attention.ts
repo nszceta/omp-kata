@@ -9,6 +9,12 @@ const START_TIMEOUT_MS = 5_000;
 /** kata's exit code for a missing (e.g. deleted) issue. */
 const NOT_FOUND_EXIT = 4;
 
+/** `proj#abcd` -> `abcd`: kata addresses one issue either way, so tracking keys on the short id. */
+function refKey(ref: string): string {
+	const hash = ref.indexOf("#");
+	return hash === -1 ? ref : ref.slice(hash + 1);
+}
+
 /**
  * Tracks issues this session claimed and drives `kata agent-hook attention-native`.
  *
@@ -18,8 +24,10 @@ const NOT_FOUND_EXIT = 4;
  * liveness; start and end use the same value so they address the same owner.
  */
 export class AttentionTracker {
-	/** ref -> session id it was started under (needed to end it correctly after a session switch). */
-	private readonly tracked = new Map<string, string>();
+	/** short id -> the spelling sent to kata and the session it was started under (needed to end it correctly). */
+	private readonly tracked = new Map<string, { ref: string; sessionId: string }>();
+	/** Bumped by endAll: an operation that captured an older value must not act after it. */
+	private generation = 0;
 
 	constructor(
 		private readonly cli: KataCli,
@@ -28,11 +36,21 @@ export class AttentionTracker {
 	) {}
 
 	refs(): string[] {
-		return [...this.tracked.keys()];
+		return [...this.tracked.values()].map(entry => entry.ref);
 	}
 
 	has(ref: string): boolean {
-		return this.tracked.has(ref);
+		return this.tracked.has(refKey(ref));
+	}
+
+	/** Value to hand to {@link unchanged}: taken before an await, checked after it. */
+	checkpoint(): number {
+		return this.generation;
+	}
+
+	/** False once {@link endAll} ran after `checkpoint` was taken. */
+	unchanged(checkpoint: number): boolean {
+		return checkpoint === this.generation;
 	}
 
 	private args(action: "start" | "end", ref: string, sessionId: string): string[] {
@@ -56,16 +74,20 @@ export class AttentionTracker {
 		return { KATA_SESSION_ID: `omp-${sessionId}` };
 	}
 
-	/** Starts attention for `ref` and tracks it. Already-tracked refs under the same session are no-ops. */
+	/** Starts attention for `ref` and tracks it once kata accepted the start. Already-tracked refs under the same session are no-ops. */
 	async start(ref: string, sessionId: string): Promise<boolean> {
-		if (this.tracked.get(ref) === sessionId) return true;
-		this.tracked.set(ref, sessionId);
+		const key = refKey(ref);
+		const checkpoint = this.generation;
+		if (this.tracked.get(key)?.sessionId === sessionId) return true;
 		const result = await this.cli.run(this.args("start", ref, sessionId), {
 			cwd: this.root,
 			timeoutMs: START_TIMEOUT_MS,
 			env: this.env(sessionId),
 		});
-		return result.code === 0;
+		// shutdown/switch ended this tracker while kata ran: do not track a ref nobody will end
+		if (result.code !== 0 || !this.unchanged(checkpoint)) return false;
+		this.tracked.set(key, { ref, sessionId });
+		return true;
 	}
 
 	/** An already-closed issue must not get attention (kata would still write metadata to it). */
@@ -75,9 +97,9 @@ export class AttentionTracker {
 		return asObject(parseJsonObject(result.stdout)?.issue)?.status === "closed";
 	}
 
-	/** Closed issues keep their attention state; ending would downgrade ok to needs-human. */
-	untrack(ref: string): void {
-		this.tracked.delete(ref);
+	/** Closed issues keep their attention state; ending would downgrade ok to needs-human. Returns whether the ref was tracked. */
+	untrack(ref: string): boolean {
+		return this.tracked.delete(refKey(ref));
 	}
 
 	/**
@@ -88,13 +110,13 @@ export class AttentionTracker {
 	 */
 	async reconcile(): Promise<string[]> {
 		const snapshot = [...this.tracked];
-		const verdicts = await Promise.all(snapshot.map(([ref]) => this.isInactive(ref)));
+		const verdicts = await Promise.all(snapshot.map(([, entry]) => this.isInactive(entry.ref)));
 		const evicted: string[] = [];
-		snapshot.forEach(([ref, sessionId], i) => {
+		snapshot.forEach(([key, entry], i) => {
 			// a re-claim under another session while the checks ran is newer than the verdict
-			if (!verdicts[i] || this.tracked.get(ref) !== sessionId) return;
-			this.tracked.delete(ref);
-			evicted.push(ref);
+			if (!verdicts[i] || this.tracked.get(key)?.sessionId !== entry.sessionId) return;
+			this.tracked.delete(key);
+			evicted.push(entry.ref);
 		});
 		return evicted;
 	}
@@ -113,13 +135,15 @@ export class AttentionTracker {
 
 	/** Applies the claim/close events of a successful bash command. Returns whether tracking changed. */
 	async applyCommand(command: string, sessionId: string, names: readonly string[]): Promise<boolean> {
+		const checkpoint = this.generation;
 		let changed = false;
 		for (const event of parseRefEvents(command, names)) {
+			// a session switch/shutdown during an earlier start ends the tracker; later events must not start new refs
+			if (!this.unchanged(checkpoint)) break;
 			if (event.action === "claim") {
-				if (this.tracked.get(event.ref) === sessionId) continue;
-				await this.start(event.ref, sessionId);
-				changed = true;
-			} else if (this.tracked.delete(event.ref)) {
+				if (this.tracked.get(refKey(event.ref))?.sessionId === sessionId) continue;
+				if (await this.start(event.ref, sessionId)) changed = true;
+			} else if (this.untrack(event.ref)) {
 				changed = true;
 			}
 		}
@@ -129,7 +153,8 @@ export class AttentionTracker {
 	/** Ends every tracked ref via detached processes (shutdown has a 2s budget) and clears tracking. */
 	endAll(): string[] {
 		const ended = this.refs();
-		for (const [ref, sessionId] of this.tracked) {
+		this.generation++;
+		for (const { ref, sessionId } of this.tracked.values()) {
 			this.cli.spawnDetached(this.args("end", ref, sessionId), { cwd: this.root, env: this.env(sessionId) });
 		}
 		this.tracked.clear();

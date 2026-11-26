@@ -1,18 +1,21 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import {
 	DEFAULT_SETTINGS,
 	ENV_NAMES,
 	type Env,
 	type KataSettings,
 	loadPluginSettings,
+	MAX_INBOX_POLL_SECONDS,
 	parseBoolean,
 	parseNonNegativeNumber,
 	parseRefGuardMode,
 	resolveSettings,
+	sanitizeSettings,
 	type SettingsLoader,
 } from "../../src/config";
+import { tempDir } from "./helpers";
 
 const loaderOf =
 	(stored: Record<string, unknown>): SettingsLoader =>
@@ -200,6 +203,59 @@ describe("inboxPollSeconds", () => {
 	test("plugin value may be a numeric string", async () => {
 		expect((await resolveWith({}, { inboxPollSeconds: "12" })).inboxPollSeconds).toBe(12);
 	});
+
+	test("values above the timer-safe maximum are capped", async () => {
+		expect((await resolveWith({ OMP_KATA_INBOX_POLL_SECONDS: String(MAX_INBOX_POLL_SECONDS * 1000) })).inboxPollSeconds).toBe(
+			MAX_INBOX_POLL_SECONDS,
+		);
+		expect((await resolveWith({}, { inboxPollSeconds: 1e9 })).inboxPollSeconds).toBe(MAX_INBOX_POLL_SECONDS);
+	});
+});
+
+describe("sanitizeSettings", () => {
+	const root = "/repo";
+	const withSettings = (over: Partial<KataSettings>): KataSettings => ({ ...DEFAULT_SETTINGS, ...over });
+
+	test("keeps a bare executable name and absolute paths outside the workspace", () => {
+		for (const executable of ["kata", "/opt/kata", "/usr/local/bin/kata"]) {
+			expect(sanitizeSettings(withSettings({ executable }), root).executable).toBe(executable);
+		}
+	});
+
+	test("rejects relative and in-workspace executables", () => {
+		for (const executable of ["./payload", "rel/kata", "/repo/payload", "/repo/sub/../payload"]) {
+			expect(sanitizeSettings(withSettings({ executable }), root).executable).toBe("kata");
+		}
+	});
+
+	test("rejects relative and in-workspace contract sources", () => {
+		for (const contractSource of [".kata.md", "docs/contract.md", "/repo/.kata.md"]) {
+			expect(sanitizeSettings(withSettings({ contractSource }), root).contractSource).toBe("");
+		}
+		expect(sanitizeSettings(withSettings({ contractSource: "/etc/contract.md" }), root).contractSource).toBe(
+			"/etc/contract.md",
+		);
+	});
+
+	test("rejects an absolute executable that is a symlink into the workspace", () => {
+		const base = tempDir("omp-kata-settings-");
+		try {
+			const ws = join(base, "ws");
+			mkdirSync(ws, { recursive: true });
+			const inside = join(ws, "payload");
+			writeFileSync(inside, "#!/bin/sh\n");
+			const outsideLink = join(base, "outside-link");
+			symlinkSync(inside, outsideLink);
+			expect(sanitizeSettings(withSettings({ executable: outsideLink }), ws).executable).toBe("kata");
+
+			// A symlinked workspace root must not be bypassed by the real path of a file inside it.
+			const linkedRoot = join(base, "ws-link");
+			symlinkSync(ws, linkedRoot);
+			expect(sanitizeSettings(withSettings({ executable: inside }), linkedRoot).executable).toBe("kata");
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
 });
 
 describe("identity setting", () => {
@@ -307,6 +363,22 @@ describe("settings loader", () => {
 		expect(typeof settings).toBe("object");
 		expect(settings).not.toBeNull();
 		expect(Array.isArray(settings)).toBe(false);
+	});
+
+	test("the real loadPluginSettings ignores project-local overrides", async () => {
+		const project = tempDir("omp-kata-settings-project-");
+		try {
+			mkdirSync(join(project, ".omp"), { recursive: true });
+			writeFileSync(
+				join(project, ".omp", "plugin-overrides.json"),
+				JSON.stringify({ settings: { "omp-kata": { executable: "./payload", contractSource: ".project-only-kata-contract" } } }),
+			);
+			const settings = await loadPluginSettings(project);
+			expect(settings.executable).not.toBe("./payload");
+			expect(settings.contractSource).not.toBe(".project-only-kata-contract");
+		} finally {
+			rmSync(project, { recursive: true, force: true });
+		}
 	});
 });
 

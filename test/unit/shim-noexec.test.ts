@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { chmodSync, chownSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ShimHost, ShimUnavailableError } from "../../src/shim";
+import { isSafeTempRoot, ShimHost, ShimUnavailableError } from "../../src/shim";
 import { bashCall, loadExtension, tempDir } from "./helpers";
 import { HOST_PID, prompt, Rig } from "./extension-harness";
 
@@ -173,11 +174,98 @@ describe("ShimHost root selection", () => {
 		expect(stateDir.startsWith("relative/")).toBe(false);
 	});
 
+	test("isSafeTempRoot accepts absolute private/sticky roots and rejects relative or shared non-sticky roots", () => {
+		expect(isSafeTempRoot(newRoot())).toBe(true);
+		expect(isSafeTempRoot(tmpdir())).toBe(true);
+		expect(isSafeTempRoot("relative/root")).toBe(false);
+		const shared = newRoot();
+		chmodSync(shared, 0o777);
+		expect(isSafeTempRoot(shared)).toBe(false);
+		const parent = newRoot();
+		chmodSync(parent, 0o777);
+		const privateChild = join(parent, "private-child");
+		mkdirSync(privateChild, { mode: 0o700 });
+		expect(isSafeTempRoot(privateChild)).toBe(false);
+	});
+
+	test("a non-sticky world-writable root is skipped", () => {
+		const unsafe = newRoot();
+		chmodSync(unsafe, 0o777);
+		const safe = newRoot();
+		const host = newHost({ PATH: "/usr/bin" }, { tmpRoot: [unsafe, safe] });
+
+		expect(host.install("/real/kata").startsWith(`${safe}/`)).toBe(true);
+		expect(readdirSync(unsafe)).toEqual([]);
+	});
+
+	test("a relative TMPDIR disables identity instead of creating a cwd-relative state dir", () => {
+		const original = process.env.TMPDIR;
+		process.env.TMPDIR = "relative-root";
+		try {
+			const host = newHost({ PATH: "/usr/bin" }, {});
+			expect(() => host.install("/real/kata")).toThrow(ShimUnavailableError);
+		} finally {
+			if (original === undefined) delete process.env.TMPDIR;
+			else process.env.TMPDIR = original;
+		}
+	});
+
 	test("a root that cannot be written to is skipped like a noexec one", () => {
 		const second = newRoot();
 		const host = newHost({ PATH: "/usr/bin" }, { tmpRoot: ["/nonexistent/omp-kata-root", second] });
 
 		expect(host.install("/real/kata").startsWith(`${second}/`)).toBe(true);
+	});
+
+	test("a symlinked tmpRoot is used through its canonical target, never the link", () => {
+		const outer = newRoot();
+		const target = join(outer, "real-root");
+		mkdirSync(target, { mode: 0o700 });
+		const link = join(outer, "link-root");
+		symlinkSync(target, link);
+		expect(isSafeTempRoot(link)).toBe(true);
+
+		const env: Record<string, string | undefined> = { PATH: "/usr/bin" };
+		const host = newHost(env, { tmpRoot: link });
+
+		const stateDir = host.install("/real/kata");
+
+		const canonical = realpathSync(target);
+		expect(stateDir.startsWith(`${canonical}/omp-kata-${process.pid}-`)).toBe(true);
+		expect(stateDir.includes(link)).toBe(false);
+		expect(realpathSync(stateDir)).toBe(stateDir);
+		expect(env.PATH?.split(":")[0]).toBe(join(stateDir, "bin"));
+		expect(env.OMP_KATA_STATE_DIR).toBe(stateDir);
+		expect(readdirSync(target)).toHaveLength(1);
+	});
+
+	// Changing a directory's owner needs privileges. Under a real root (or a uid-mapped namespace) these
+	// construct the exact stat shapes; the chown throw keeps a single-uid rootless namespace green.
+	const asRoot = test.skipIf(process.getuid?.() !== 0);
+	const OTHER_UID = 1;
+
+	asRoot("a private root owned by another uid is rejected", () => {
+		const root = newRoot();
+		try {
+			chownSync(root, OTHER_UID, -1);
+		} catch {
+			return;
+		}
+		expect(isSafeTempRoot(root)).toBe(false);
+	});
+
+	asRoot("a private root under a non-sticky parent owned by another uid is rejected", () => {
+		const outer = newRoot();
+		const parent = join(outer, "other-parent");
+		mkdirSync(parent, { mode: 0o755 });
+		try {
+			chownSync(parent, OTHER_UID, -1);
+		} catch {
+			return;
+		}
+		const child = join(parent, "private-child");
+		mkdirSync(child, { mode: 0o700 });
+		expect(isSafeTempRoot(child)).toBe(false);
 	});
 });
 

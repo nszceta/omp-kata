@@ -1,0 +1,5 @@
+# This plugin and its tests never load omp's local embedding/ONNX stack;
+# omitting pi-coding-agent's optional/peer packages cuts node_modules from ~1 GB to ~277 MB.
+[install]
+optional = false
+peer = false

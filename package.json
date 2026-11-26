@@ -13,7 +13,7 @@
   ],
   "exports": "./src/index.ts",
   "engines": {
-    "bun": ">=1.3.14"
+    "bun": ">=1.4.0"
   },
   "scripts": {
     "test": "bun test",
@@ -29,7 +29,7 @@
       "executable": {
         "type": "string",
         "default": "kata",
-        "description": "kata executable (name on PATH or absolute path)"
+        "description": "kata executable (name on PATH or absolute path outside the workspace; relative/in-workspace values fall back to kata)"
       },
       "contract": {
         "type": "boolean",
@@ -39,7 +39,7 @@
       "contractSource": {
         "type": "string",
         "default": "",
-        "description": "Passed as --source to `kata agent-contract-hook` when non-empty (replaces the built-in contract text)"
+        "description": "Passed as --source to `kata agent-contract-hook` when non-empty (replaces the built-in contract text; must be an absolute path outside the workspace)"
       },
       "inbox": {
         "type": "boolean",
@@ -50,12 +50,12 @@
         "type": "number",
         "default": 15,
         "min": 0,
-        "description": "Minimum seconds between mid-turn/idle inbox checks; 0 checks after every tool result"
+        "description": "Minimum seconds between mid-turn/idle inbox checks (capped at 86400); 0 checks after every tool result"
       },
       "wakeOnInbox": {
         "type": "boolean",
         "default": false,
-        "description": "An idle main session starts a turn when new inbox requests arrive (otherwise it only notifies)"
+        "description": "An idle main session starts a turn when new inbox requests arrive, but only if every request comes from this session's own actor (otherwise it only notifies)"
       },
       "attention": {
         "type": "boolean",
@@ -79,7 +79,7 @@
   "devDependencies": {
     "@oh-my-pi/pi-ai": "18.12.6",
     "@oh-my-pi/pi-coding-agent": "18.12.6",
-    "@types/bun": "^1.3.14",
+    "@types/bun": "1.4.4",
     "typescript": "^5.9.3"
   }
 }

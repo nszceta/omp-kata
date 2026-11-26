@@ -174,6 +174,23 @@ describe("publication lifecycle", () => {
 		expect(rig.stateDir).toBeUndefined();
 		expect(rig.shimDirs()).toEqual([]);
 	});
+
+	test("a whoami that resolves after session_shutdown publishes nothing", async () => {
+		rig.fake.reply("whoami", { stdout: WHOAMI_OK, sleepMs: 400 });
+		const host = await rig.load(NO_CONTRACT);
+		const ctx = rig.session();
+
+		const starting = host.emit("session_start", {}, ctx);
+		await waitFor(() => rig.calls("whoami").length === 1, 5000, "whoami in flight");
+		await host.emit("session_shutdown", {}, ctx);
+		// the session_start handler only resolves after the shared identity promise, so every
+		// continuation that could have published has run by now
+		await starting;
+
+		expect(rig.stateDir).toBeUndefined();
+		expect(rig.shimDirs()).toEqual([]);
+		expect(published(SESSION)).toBe(false);
+	});
 });
 
 describe("when the shim stays out of the way", () => {

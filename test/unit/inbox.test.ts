@@ -140,9 +140,38 @@ describe("InboxTracker (fake kata)", () => {
 			expect(await t.check(2)).toBeUndefined();
 
 			setInbox(T2);
-			expect(await t.check(3)).toBe(`<kata_inbox>\n${INBOX_FRAMING}\n${T2}\n</kata_inbox>`);
+			expect(await t.check(3)).toBe(formatInbox(request("bbbb", "second"), USER));
 			expect(await t.check(4)).toBeUndefined();
 			expect(fake.callsTo("inbox")).toHaveLength(5);
+		});
+
+		test("delivers only the rows added since the last delivery, not the whole snapshot", async () => {
+			const t = tracker();
+			setInbox(T1);
+			expect(await t.check(0)).toBe(formatInbox(T1, USER));
+
+			const three = inboxText(USER, request("aaaa", "first"), request("bbbb", "second"), request("cccc", "third"));
+			setInbox(three);
+			expect(await t.check(1)).toBe(formatInbox(`${request("bbbb", "second")}\n${request("cccc", "third")}`, USER));
+			expect(await t.check(2)).toBeUndefined();
+		});
+
+		test("an unchanged snapshot delivers nothing", async () => {
+			const t = tracker();
+			setInbox(T2);
+			expect(await t.check(0)).toBe(formatInbox(T2, USER));
+			expect(await t.check(1)).toBeUndefined();
+			expect(await t.check(2)).toBeUndefined();
+		});
+
+		test("an edited message for the same issue id is delivered again", async () => {
+			const t = tracker();
+			setInbox(T1);
+			expect(await t.check(0)).toBe(formatInbox(T1, USER));
+
+			setInbox(inboxText(USER, request("aaaa", "edited message")));
+			// later deliveries carry only the new row, not kata's header preamble again
+			expect(await t.check(1)).toBe(formatInbox(request("aaaa", "edited message"), USER));
 		});
 
 		test("non-empty then empty yields the 'now empty' payload exactly once", async () => {
@@ -155,7 +184,7 @@ describe("InboxTracker (fake kata)", () => {
 			expect(await t.check(2)).toBeUndefined();
 			expect(await t.check(3)).toBeUndefined();
 
-			// a new request after the clear is delivered again
+			// a new request after the clear is delivered again (with the header preamble)
 			setInbox(T1);
 			expect(await t.check(4)).toBe(`<kata_inbox>\n${INBOX_FRAMING}\n${T1}\n</kata_inbox>`);
 		});
@@ -244,9 +273,9 @@ describe("InboxTracker (fake kata)", () => {
 			expect(results.filter(r => r !== undefined)).toEqual([`<kata_inbox>\n${INBOX_FRAMING}\n${T1}\n</kata_inbox>`]);
 			expect(fake.callsTo("inbox")).toHaveLength(1);
 
-			// the in-progress guard is released: the next poll runs normally
+			// the in-progress guard is released: the next poll runs normally (and carries only the new row)
 			setInbox(T2);
-			expect(await t.check(2)).toBe(`<kata_inbox>\n${INBOX_FRAMING}\n${T2}\n</kata_inbox>`);
+			expect(await t.check(2)).toBe(formatInbox(request("bbbb", "second"), USER));
 		});
 	});
 
@@ -291,6 +320,18 @@ describe("InboxTracker (fake kata)", () => {
 			expect(await t.check(0)).toBeUndefined();
 			// nor does another idle poll
 			expect(await t.idlePoll(true)).toBeUndefined();
+		});
+
+		test("wake gating still uses the whole snapshot after rows were delivered", async () => {
+			const t = tracker();
+			setInbox(T1);
+			await t.check(0);
+
+			const mixed = inboxText(USER, request("aaaa", "first"), request("bbbb", "evil", "mallory"));
+			setInbox(mixed);
+			expect(await t.idlePoll(true)).toEqual({ kind: "notify", message: "kata: 2 inbox request(s) for adam/bob", count: 2 });
+			// the foreign row is still carried by the next prompt, alone
+			expect(await t.check(1)).toBe(formatInbox(request("bbbb", "evil", "mallory"), USER));
 		});
 
 		test("wake: a request from a different actor is announced, not woken on", async () => {

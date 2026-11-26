@@ -2,16 +2,16 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@oh-my-pi/pi-coding-
 import type { KataSettings } from "./config";
 import { clearContractCache } from "./contract";
 import { clearActorCache } from "./identity";
-import { InboxTracker } from "./inbox";
+import { sanitizeInline, stripControl } from "./sanitize";
 import type { KataRuntime } from "./session";
 
-export interface CommandHost {
+interface CommandHost {
 	runtime(ctx: ExtensionCommandContext): Promise<KataRuntime | undefined>;
 	settings(ctx: ExtensionCommandContext): Promise<KataSettings>;
 	workspaceRoot(cwd: string): string | undefined;
 }
 
-export const USAGE = "usage: /kata [status | inbox | refresh]";
+const USAGE = "usage: /kata [status | inbox | refresh]";
 
 function describeContract(rt: KataRuntime): string {
 	const result = rt.lastContract;
@@ -20,36 +20,35 @@ function describeContract(rt: KataRuntime): string {
 	return result.ok ? `${Buffer.byteLength(result.text)} bytes` : `unavailable (${result.reason})`;
 }
 
-export async function statusReport(host: CommandHost, ctx: ExtensionCommandContext): Promise<string> {
+async function statusReport(host: CommandHost, ctx: ExtensionCommandContext): Promise<string> {
 	const rt = await host.runtime(ctx);
-	const settings = await host.settings(ctx);
+	const settings = rt ? rt.settings : await host.settings(ctx);
 	const lines: string[] = [];
 	if (!rt) {
-		lines.push(`kata: not a kata workspace (no .kata.toml at or above ${ctx.cwd})`);
+		lines.push(`kata: not a kata workspace (no .kata.toml at or above ${sanitizeInline(ctx.cwd)})`);
 	} else {
 		const identity = await rt.identity();
-		lines.push(`kata workspace: ${rt.root}`);
-		lines.push(`actor: ${identity?.actor ?? "unknown (kata whoami failed)"}`);
-		lines.push(`teammate: ${identity?.teammate || "(none)"}`);
-		lines.push(`inbox user: ${identity?.inboxUser ?? "unknown"}`);
+		lines.push(`kata workspace: ${sanitizeInline(rt.root)}`);
+		lines.push(`actor: ${identity ? sanitizeInline(identity.actor) : "unknown (kata whoami failed)"}`);
+		lines.push(`teammate: ${identity?.teammate ? sanitizeInline(identity.teammate) : "(none)"}`);
+		lines.push(`inbox user: ${identity ? sanitizeInline(identity.inboxUser) : "unknown"}`);
 		await rt.reconcileTracked(true);
-		lines.push(`tracked refs: ${rt.attention.refs().join(", ") || "(none)"}`);
+		lines.push(`tracked refs: ${rt.attention.refs().map(sanitizeInline).join(", ") || "(none)"}`);
 		lines.push(`contract: ${describeContract(rt)}`);
 		lines.push(`inbox: ${rt.inbox ? `${rt.inbox.count} request(s)` : "not checked yet"}`);
 	}
-	lines.push(`settings: ${JSON.stringify(settings)}`);
+	lines.push(`settings: ${sanitizeInline(JSON.stringify(settings))}`);
 	return lines.join("\n");
 }
 
-export async function inboxReport(host: CommandHost, ctx: ExtensionCommandContext): Promise<string> {
+async function inboxReport(host: CommandHost, ctx: ExtensionCommandContext): Promise<string> {
 	const rt = await host.runtime(ctx);
 	if (!rt) return "kata: not a kata workspace";
 	const identity = await rt.identity();
 	if (!identity) return "kata: could not resolve the kata actor (kata whoami failed)";
-	const tracker = rt.inbox ?? new InboxTracker(rt.cli, rt.root, identity.inboxUser, identity.actor, rt.settings.inboxPollSeconds);
-	const text = await tracker.fetch();
-	if (text === undefined) return `kata: could not read the inbox for ${identity.inboxUser}`;
-	return text === "" ? "kata inbox empty" : text;
+	const text = await rt.readInbox();
+	if (text === undefined) return `kata: could not read the inbox for ${sanitizeInline(identity.inboxUser)}`;
+	return text === "" ? "kata inbox empty" : stripControl(text, true);
 }
 
 export function registerKataCommand(pi: ExtensionAPI, host: CommandHost, onRefresh: (ctx: ExtensionCommandContext) => void): void {
